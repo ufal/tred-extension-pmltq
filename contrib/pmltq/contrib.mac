@@ -1,9 +1,14 @@
-#ifndef tree_query
+#-*- cperl -*-
+
+#ifndef pmltq
+#define pmltq
 #define tree_query
 
 #include <contrib/pml/PML.mak>
 
 #binding-context Tree_Query
+
+#include "obsolete.inc"
 
 #include "tree_query.mak"
 
