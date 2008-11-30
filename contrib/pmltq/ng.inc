@@ -53,7 +53,7 @@ sub fix_tecto_coap {
 sub fix_or2in {
   my ($or) = @_;
   return unless $or->{'#name'} eq 'or';
-  my @tests = $or->childnodes;
+  my @tests = $or->children;
   if (@tests>3
       and !(first { !($_->{'#name'} eq 'test' and $_->{operator} eq '=') } @tests) # all are tests with =
       and !(first { !($_->{a} eq $tests[0]->{a}) } @tests)            # all have the same a

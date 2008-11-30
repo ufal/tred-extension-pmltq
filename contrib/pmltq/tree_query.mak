@@ -1868,6 +1868,7 @@ sub EditQuery {
 		 ($node->parent
 		    ? ()
 		    : (qw| >> |,
+                       [q|for/give/sort by| => qq|for ...\n    give distinct ...\n    sort by ...|],
 		       ['Analytic function' => [map { $_.'()' }
 						  sort
 						    qw( min max sum avg count ratio concat )
