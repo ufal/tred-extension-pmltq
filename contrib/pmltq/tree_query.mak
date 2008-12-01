@@ -943,10 +943,14 @@ sub AssignRelation {
       } @{GetRelationTypes($node)}
      ] : GetRelationTypes($node);
   return unless @$relations;
-  ListQuery('Select relation of the current node to its parent',
+  ListQuery('Select relation',
 	    'browse',
 	    $relations,
-	    \@sel) || return;
+	    \@sel,
+	    {
+	      label => { -text=> qq{Select relation of the current node to its parent} },
+	    }
+	   ) || return;
   SetRelation($node,$sel[0]) if @sel;
   if (@sel and $sel[0] eq 'descendant' or $sel[0] eq 'ancestor') {
     local $main::sortAttrs=0;
@@ -973,7 +977,11 @@ sub AssignType {
     ListQuery('Select node type',
 	      'browse',
 	      \@types,
-	      \@sel) || return;
+	      \@sel,
+	      {
+		label => { -text=> qq{Select type of the node} },
+	      }
+	     ) || return;
     $node->{'node-type'}=$sel[0];
   }
   return 1;
@@ -1287,10 +1295,14 @@ sub node_release_hook {
 	} @{GetRelationTypes($node)}
        ] : GetRelationTypes($node);
     return unless @$relations;
-    ListQuery('Select query-node relations to add/preserve',
+    ListQuery('Select relations',
 	      ($type eq 'ref' ? 'browse' : 'multiple'),
 	      $relations,
-	      \@sel) || return;
+	      \@sel,
+	      {
+		label => { -text=> qq{Select query-node relations to add or preserve} },
+	      }
+	     ) || return;
     if ($type eq 'node' or $type eq 'subquery') {
       init_id_map($node->root);
       AddOrRemoveRelations($node,$target,\@sel,{-add_only=>0});
@@ -1468,7 +1480,7 @@ sub SelectSearch {
   my $file;
   if ($choice=~/^File/) {
     my @sel;
-    ListQuery('Search',
+    ListQuery('Search through...',
 	      'browse',
 	      [
 		#  (map { $_->identify } @SEARCHES),
@@ -1476,7 +1488,10 @@ sub SelectSearch {
 		(map "List: ".$_->name." (".$_->file_count." files)",
 		 grep $_->file_count, TrEdFileLists())
 	       ],
-	      \@sel
+	      \@sel,
+	      {
+		label => { -text=> qq{Select a file or file-list to search through} },
+	      }
 	     ) || return;
     return unless @sel;
     $file = $sel[0];
@@ -1702,7 +1717,8 @@ sub _editor_offer_values {
 	    [map { $_=~/\D/ ? qq{"$_"} : $_ } $decl->get_values],
 	    \@sel,
 	    {
-	      top => $ed->toplevel }
+	      top => $ed->toplevel,
+	    }
 	   )) {
 	    $ed->focus;
 	    $ed->Insert(' '.$operator.' ');

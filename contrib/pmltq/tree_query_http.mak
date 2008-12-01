@@ -209,9 +209,9 @@ sub search_first {
   $self->{limit}=$limit;
   my $t1 = new Benchmark;
   my $time = timestr(timediff($t1,$t0));
+  my $query_id = $root->{id} || '';
   unless ($opts->{quiet}) {
-    my $id = $root->{id} || '*';
-    print STDERR "$id\t".$self->identify."\t$time\n";
+    print STDERR "$query_id\t".$self->identify."\t$time\n";
   }
   $self->update_label('');
   unless ($res->is_success) {
@@ -239,11 +239,41 @@ sub search_first {
 		      $how_many,
 		      'Display','Cancel') eq 'Display';
     unless ($returns_nodes) {
-      EditBoxQuery(
+      my $res = EditBoxQuery(
 	"Results ($how_many)",
 	join("\n",map { join("\t",@$_) } @$results),
 	qq{},
-	{-buttons=>['Close']}
+	
+	{-buttons=>['Close','Save To File'],
+	 -init => sub {
+	   my ($d)=@_;
+	   $d->Subwidget('B_Save To File')->configure(-command => sub {
+	     my $filename = main::get_save_filename($d,
+						    -filetypes=>[["CSV",['.csv','.txt']],
+								 ["All files",['*','*.*']],
+								],
+						    -title => "Save results as ...",
+						    -initialfile=> ($query_id ? "results_for_".$query_id.".txt" : 'results.txt'),
+						   );
+	     return unless defined($filename) and length($filename);
+	     my $backup;
+	     if (-f $filename) {
+	       $backup=1 if rename $filename, $filename.'~';
+	     }
+	     if (open my $fh, '>:utf8', $filename) {
+	       for (@$results) {
+		 print $fh join("\t",@$_)."\n";
+	       }
+	       close $fh;
+	     } else {
+	       TrEd::Basics::errorMessage($d,'Cannot write to '.$filename.': '.$!);
+	       if ($backup) {
+		 rename $filename.'~', $filename;
+	       }
+	     }
+           });
+	 }
+	}
        );
       return;
     }
@@ -495,10 +525,14 @@ sub init {
   if (!$id) {
     my @opts = ((map { $_->{id} } map $_->value, grep $_->name eq 'http', SeqV($cfgs)),' CREATE NEW CONNECTION ');
     my @sel= $configuration ? $configuration->{id} : @opts ? $opts[0] : ();
-    ListQuery('Select treebase connection',
+    ListQuery('Select connection',
 			 'browse',
 			 \@opts,
-			 \@sel) || return;
+			 \@sel,
+	      {
+		label => { -text=> qq{Select from previously configured server connections\nor create a new one.} },
+	      }
+	     ) || return;
     ($id) = @sel;
   }
   return unless $id;
