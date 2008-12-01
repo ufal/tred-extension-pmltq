@@ -1662,14 +1662,15 @@ sub EditSubtree {
 our ($match_node_re,$variable_re,$relation_re);
 $match_node_re  = qr/\[((?:(?> [^][]+ )|(??{ $match_node_re }))*)\]/x;
 $variable_re = qr/\$[[:alpha:]_][[:alnum:]_]*/;
-$relation_re = qr/descendant|ancestor|child|parent|descendant|ancestor|${Tree_Query::user_defined}|depth-first-precedes|depth-first-follows|order-precedes|order-follows|same-tree-as/;
+$relation_re = qr/descendant|ancestor|child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|same-tree-as/;
 
 sub _find_type_in_query_string {
   my ($context,$rest)=@_;
   my ($type,$var);
+  my $user_defined = Tree_Query::Common::user_defined().'|';
   if ($context =~ /(${variable_re})\.$/) {
     $var = $1;
-    if (($context.$rest)=~/(?:(${relation_re})(?:\s+|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+    if (($context.$rest)=~/(?:(${user_defined}${relation_re})(?:\s+|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
       $type = $2;
     }
   } else {
@@ -1685,7 +1686,7 @@ sub _find_type_in_query_string {
     }
     return unless length $context;
     $context=reverse $context;
-    if ($context =~ /(?:(${relation_re})(?:\s+|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+    if ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
       $type = $2;
     }
   }
@@ -1803,7 +1804,8 @@ sub EditQuery {
 			my ($node_type) = _find_type_in_query_string($prev,
 								     $ed->get('insert','end'));
 			my $relation = 'child';
-			if ($prev=~/(${Tree_Query::user_defined})\s*$/) {
+			my $user_defined = Tree_Query::Common::user_defined();
+			if ($prev=~/(${user_defined})\s*$/) {
 			  $relation = $1.' (user-defined)';
 			} elsif ($prev=~/(${relation_re})\s*$/) {
 			  $relation = $1;

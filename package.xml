@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<tred_extension xmlns="http://ufal.mff.cuni.cz/pdt/pml/" install_size="1409406">
+<tred_extension xmlns="http://ufal.mff.cuni.cz/pdt/pml/" install_size="1410771">
   <head>
     <schema href="tred_extension_schema.xml"/>
   </head>
   <pkgname>pmltq</pkgname>
+  <icon>icons/find.png</icon>
   <repository href="http://ufal.mff.cuni.cz/~pajas/tred/extensions/"/>
   <title>PML Tree Query Interface for TrEd</title>
-  <version>1.0</version>
+  <version>1.1</version>
   <copyright year="2008">Petr Pajas</copyright>
   <description>Provides graphical interface for PML-TQ, which is a system for querying over
   treebanks or local files with a powerful query language.
