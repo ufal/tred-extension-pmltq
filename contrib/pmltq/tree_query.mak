@@ -1436,12 +1436,12 @@ sub SelectSearch {
     -cancel_button=>'Cancel',
     -buttons => ['Cancel'],
   );
-  $d->add('Label', -text=>'What are you going to search?')->pack(-pady => 10);
+  $d->add('Label', -text=>'What data are you going to search through?')->pack(-pady => 10);
   my $f = $d->add('Frame')->pack(qw(-expand 1 -fill both));
   $d->BindEscape;
   my ($vol,$dir)=File::Spec->splitpath(__this_module_path());
   my @b;
-  for my $b (['File (local)' => 'file', 0, 0, 0], # grid row, grid column, underline
+  for my $b (['Files (local)' => 'file', 0, 0, 0], # grid row, grid column, underline
 #	     ['List of files (local)' => 'filelist',0,1,5],
 	     ['Treebank (server)' => 'remote-db',0,1,0],
 #	     ['Database (server)' => 'local-db',1,1,0],

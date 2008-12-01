@@ -455,8 +455,12 @@ sub edit_config {
     search_field => 0,
     focus => $focus,
     no_sort=>1,
+    password_map => {
+      password=>1,
+      'configurations/http/password' => 1,
+      'configurations/dbi/password' => 1,
+    },
   });
-
 }
 
 sub get_schema_name_for {
