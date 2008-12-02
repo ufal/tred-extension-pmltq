@@ -70,15 +70,15 @@ sub new {
     my $tb;
     ($tb, $self->{label}) = Tree_Query::CreateSearchToolbar($ident);
     $tb->Label(-text=>"Timeout:")->pack(-side=>'left',-padx=>10);
-    $tb->Spinbox(
+    my $b = $tb->Spinbox(
       -background=>'white',
       -widt=>3,
       -from => 10,
       -to => 300,
       -increment=>5,
       -textvariable => \$self->{spinbox_timeout},
-     )->pack(-side => 'left',
-	    );
+     )->pack(-side => 'left', );
+    AttachTooltip($b,'Select timeout in seconds.');
   }
   $self->{on_destroy} = MacroCallback(
     sub {
@@ -598,69 +598,37 @@ sub show_result {
 	  }
       }
     }
+    my $no = $self->{current_result_no};
     if ($dir eq 'prev') {
-      my $no = $self->{current_result_no};
       if ($no>0) {
 	$self->{current_result_no} = --$no;
 	$self->{current_result}=[$self->idx_to_pos($self->{results}[$no])];
       }
-      for my $win (@wins) {
-	$grp=$win;
-	my $idx = GetMinorModeData('Tree_Query_Results','index');
-	local $win->{noRedraw}=1;
-	if (!defined($idx) or $idx>$#{$self->{last_query_nodes}}) {
-	  $idx = $self->_assign_first_result_index_not_shown($seen,$win);
-	  SetMinorModeData('Tree_Query_Results','index',$idx);
-	}
-	if (defined $idx) {
-	  my $result_fn = $self->resolve_path($self->{current_result}[$idx]);
-	  Open($result_fn,{-keep_related=>1});
-	} else {
-	  CloseFileInWindow($win);
-	}
-	$win->{noRedraw}=0;
-	Redraw($win) unless $win==$save[2];
-      }
     } elsif ($dir eq 'next') {
-      my $no = $self->{current_result_no};
       if ($no<$#{$self->{results}}) {
 	$self->{current_result_no} = ++$no;
 	$self->{current_result}=[$self->idx_to_pos($self->{results}[$no])];
       }
-      for my $win (@wins) {
-	$grp=$win;
-	my $idx = GetMinorModeData('Tree_Query_Results','index');
-	local $win->{noRedraw}=1;
-	if (!defined($idx) or $idx>$#{$self->{last_query_nodes}}) {
-	  $idx = $self->_assign_first_result_index_not_shown($seen,$win);
-	  SetMinorModeData('Tree_Query_Results','index',$idx);
-	}
-	if (defined $idx) {
-	  my $result_fn = $self->resolve_path($self->{current_result}[$idx]);
-	  Open($result_fn,{-keep_related=>1});
-	} else {
-	  CloseFileInWindow($win);
-	}
-	$win->{noRedraw}=0;
-	Redraw($win) unless $win==$save[2];
+    }
+    for my $win (@wins) {
+      $grp=$win;
+      my $idx = GetMinorModeData('Tree_Query_Results','index');
+      local $win->{noRedraw}=1;
+      if (!defined($idx) or $idx>$#{$self->{last_query_nodes}}) {
+	$idx = $self->_assign_first_result_index_not_shown($seen,$win);
+	SetMinorModeData('Tree_Query_Results','index',$idx);
       }
-    } elsif ($dir eq 'current') {
-      for my $win (@wins) {
-	$grp=$win;
-	my $idx = GetMinorModeData('Tree_Query_Results','index');
-	local $win->{noRedraw}=1;
-	if (!defined($idx) or $idx>$#{$self->{last_query_nodes}}) {
-	  $idx = $self->_assign_first_result_index_not_shown($seen,$win);
-	  SetMinorModeData('Tree_Query_Results','index',$idx);
+      if (defined $idx) {
+	my $result_fn = $self->resolve_path($self->{current_result}[$idx]);
+	Open($result_fn,{-keep_related=>1});
+      } else {
+	CloseFileInWindow($win);
 	}
-	if (defined $idx) {
-	  my $result_fn = $self->resolve_path($self->{current_result}[$idx]);
-	  Open($result_fn,{-keep_related=>1});
-	} else {
-	  CloseFileInWindow($win);
-	}
-	$win->{noRedraw}=0;
-	Redraw($win) unless $win==$save[2];
+      $win->{noRedraw}=0;
+      unless ($win==$save[2]) {
+	Redraw($win);
+      } else {
+	$save[0]=CurrentNodeInOtherWindow($win);
       }
     }
   };

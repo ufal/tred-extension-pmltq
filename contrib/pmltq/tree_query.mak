@@ -345,9 +345,9 @@ my @TOOLBAR_BINDINGS = (
 
 DeclareMinorMode 'Tree_Query_Results' => {
   abbrev => 'reslt',
-  bindings => {
-    'n' => sub { $SEARCH && $SEARCH->show_next_result },
-    'p' => sub { $SEARCH && $SEARCH->show_prev_result },
+  priority_bindings => {
+    'n' => sub { $SEARCH && $SEARCH->show_next_result; ChangingFile(0); },
+    'p' => sub { $SEARCH && $SEARCH->show_prev_result; ChangingFile(0); },
   },
   pre_hooks => {
     root_style_hook => sub {
@@ -1609,7 +1609,7 @@ sub CreateSearchToolbar {
 		'Show next match (n)',
 	       ],
 	      ) {
-    $tb->Button(-text  => $but->[0],
+    my $b = $tb->Button(-text  => $but->[0],
 		-command => MacroCallback($but->[1]),
 		-padx => 2,
 		-font    =>'C_small',
@@ -1619,6 +1619,7 @@ sub CreateSearchToolbar {
 		-image => main::icon($grp->{framegroup},$but->[2]),
 		-compound => 'top',
 	       )->pack(-side=>'left',-padx => 5);
+    AttachTooltip($b,$but->[3]);
   }
   my $l = $tb->Label(-text=>$ident,-font=>'C_small')->pack(-side=>'left');
   $l->bind('<1>',
@@ -1632,7 +1633,7 @@ sub CreateSearchToolbar {
 	       ChangingFile(0);
 	     }),
 	  );
-  $tb->Button(-text=>'x',
+  my $b = $tb->Button(-text=>'x',
 	      -font => 'C_small',
 		-takefocus=>0,
 	      -relief => $main::buttonsRelief,
@@ -1647,6 +1648,7 @@ sub CreateSearchToolbar {
 					   ChangingFile(0);
 					 },$ident])
 	     )->pack(-side=>'right');
+  AttachTooltip($b,'Close this search.');
   my $label;
   $tb->Label(-textvariable=>\$label,-font=>'C_small')->pack(-side=>'right',-padx => 5);
   return ($tb,\$label);
