@@ -623,7 +623,7 @@ sub show_result {
 	Open($result_fn,{-keep_related=>1});
       } else {
 	CloseFileInWindow($win);
-	}
+      }
       $win->{noRedraw}=0;
       unless ($win==$save[2]) {
 	Redraw($win);
