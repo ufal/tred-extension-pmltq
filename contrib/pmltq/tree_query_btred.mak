@@ -1007,13 +1007,13 @@ sub claim_search_win {
 	  $node='$node';
 	}
 	my $attr=join('/',@$pt);
-	## FIXME: hack: not needed once we have equality for nodes
-	if ($attr =~ /^(?:tag|lemma|form)/) {
-	  $attr='m/'.$attr; #FIXME: remove me
-	} else {
-	  $attr =~ s{^tfa/}{}; #FIXME: remove me
-	}
-	$attr = (($attr=~m{/}) ? $node.qq{->attr(q($attr))} : $node.qq[->{q($attr)}]);
+# 	## FIXME: hack: not needed once we have equality for nodes
+# 	if ($attr =~ /^(?:tag|lemma|form)/) {
+# 	  $attr='m/'.$attr; #FIXME: remove me
+# 	} else {
+# 	  $attr =~ s{^tfa/}{}; #FIXME: remove me
+# 	}
+	$attr = q`do{ my $v=`.(($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]).q`; $v=$v->[0] while ref($v) eq 'Fslib::List' or ref($v) eq 'Fslib::Alt'; $v} `;
 	return qq{ $attr };
       } elsif ($type eq 'FUNC') {
 	my $name = $pt->[0];
