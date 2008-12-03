@@ -552,49 +552,49 @@ sub switch_context_hook {
  CreateStylesheets();
  SetCurrentStylesheet('Tree_Query'),Redraw()
    if GetCurrentStylesheet() ne 'Tree_Query'; #eq STYLESHEET_FROM_FILE();
- #  FileAppData('noautosave',1);
-# if ($prev ne $new) {
-   if (GetUserToolbar('Tree_Query')) {
-     unless (UserToolbarVisible('Tree_Query')) {
-       ShowUserToolbar('Tree_Query');
-     }
-     EnableUserToolbar('Tree_Query');
-   } else {
-     my $tb = NewUserToolbar('Tree_Query');
-     my $frame = $tb->Frame()->pack(qw(-fill x));#qw(-side top -expand 1 -fill both));
-     $frame->packPropagate;
-     for my $binding (@TOOLBAR_BINDINGS) {
-       if (ref($binding)) {
-	 my $but = $binding->{toolbar};
-	 return unless $but;
-	 my $button = $frame->Button(
-	   -command => MacroCallback($binding),
-	   -padx => 2,
-	   -font    =>'C_small',
-	   -borderwidth => 0,
-	   -takefocus=>0,
-	   -relief => $main::buttonsRelief,
-	   $but->[1] ? (-compound => 'top',
-			-image => main::icon($grp->{framegroup},$but->[1]),
-			-text  => $but->[0],
-		       ) :
+
+ if (exists &GetUserToolbar) {
+ if (GetUserToolbar('Tree_Query')) {
+   unless (UserToolbarVisible('Tree_Query')) {
+     ShowUserToolbar('Tree_Query');
+   }
+   EnableUserToolbar('Tree_Query');
+ } else {
+   my $tb = NewUserToolbar('Tree_Query');
+   my $frame = $tb->Frame()->pack(qw(-fill x));	#qw(-side top -expand 1 -fill both));
+   $frame->packPropagate;
+   for my $binding (@TOOLBAR_BINDINGS) {
+     if (ref($binding)) {
+       my $but = $binding->{toolbar};
+       return unless $but;
+       my $button = $frame->Button(
+	 -command => MacroCallback($binding),
+	 -padx => 2,
+	 -font    =>'C_small',
+	 -borderwidth => 0,
+	 -takefocus=>0,
+	 -relief => $main::buttonsRelief,
+	 $but->[1] ? (-compound => 'top',
+		      -image => main::icon($grp->{framegroup},$but->[1]),
+		      -text  => $but->[0],
+		     ) :
 		       (
 			 -text  => $but->[0]
-		       )
-		       )->pack(-side=>'left',-padx=>5);
-	 my $tooltip = $binding->{menu} || '';
-	 $tooltip .= qq{ ($binding->{key})} if $binding->{key};
-	 AttachTooltip($button,$tooltip) if $tooltip;
-       } elsif ($binding eq '---') {
-	 $frame->Frame(-bd => 2, -width => 2, -relief => 'groove')
-	   ->pack(-side=> 'left', -padx => '3', -fill => 'y', -pady => 3);
-       } elsif ($binding eq "\n") {
-	 $frame = $tb->Frame()->pack(qw(-fill x));#qw(-side top -expand 1 -fill both));
-	 $frame->packPropagate;
-       }
+			)
+		      )->pack(-side=>'left',-padx=>5);
+       my $tooltip = $binding->{menu} || '';
+       $tooltip .= qq{ ($binding->{key})} if $binding->{key};
+       AttachTooltip($button,$tooltip) if $tooltip;
+     } elsif ($binding eq '---') {
+       $frame->Frame(-bd => 2, -width => 2, -relief => 'groove')
+	 ->pack(-side=> 'left', -padx => '3', -fill => 'y', -pady => 3);
+     } elsif ($binding eq "\n") {
+       $frame = $tb->Frame()->pack(qw(-fill x)); #qw(-side top -expand 1 -fill both));
+       $frame->packPropagate;
      }
    }
- # }
+ }
+}
 }
 # sub file_reloaded_hook {
 #   FileAppData('noautosave',1);
