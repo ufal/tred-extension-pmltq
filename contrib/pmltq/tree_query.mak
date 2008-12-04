@@ -238,6 +238,13 @@ my @TOOLBAR_BINDINGS = (
     menu => 'Edit relation of the current node to its parent',
     toolbar => ['Relation','relation' ],
   },
+  {
+    command => 'CreateRelationToNamed',
+    key => 'R',
+    changing_file => 0,
+    menu => 'Create relation from the current node to a given node',
+    toolbar => ['Add Rel','add_relation' ],
+  },
   '---',
   {
     command =>  sub {
@@ -922,6 +929,32 @@ sub GetNodeName {
   }
 }
 
+sub CreateRelationToNamed {
+  my $current = $this;
+  return unless $current and $current->{'#name'} =~ m/^(node|subquery|ref)$/;
+  AutoNameAllNodes();
+  Redraw();
+  my %nodes;
+  for my $n (grep { $_->{'#name'} =~ /^(node|subquery)$/  and $_->{name}} $root->descendants) {
+    if (cmp_subquery_scope($current,$n)>=0) {
+      $nodes{$n->{name}}=$n;
+    }
+  }
+  my @sel;
+  ListQuery('Select node',
+	    'browse',
+	    [sort keys %nodes],
+	    \@sel,
+	    {
+	      label => { -text=> qq{Select target node} },
+	    }
+	   ) || return;
+  my $target = $nodes{$sel[0]};
+  if ($target) {
+    EditRelationFromTo($current,$target);
+  }
+}
+
 sub AssignRelation {
   shift unless ref $_[0];
   my $node = $_[0] || $this;
@@ -1268,52 +1301,11 @@ sub node_release_hook {
   return unless $target;
   print "NODE_RELEASE_HOOK: $mod, $node->{'#name'}, $target->{'#name'}, $node->{optional}\n";
   if (defined($mod) and $mod =~ /^(Control|Control-3|-2)$/) {
-    my $type = $node->{'#name'};
-    my $target_is = $target->{'#name'};
-    return 'stop' unless $target_is =~/^(?:node|subquery)$/
-      and $type =~/^(?:node|subquery|ref)$/;
-    return 'stop' if cmp_subquery_scope($node,$target)<0;
-    my @sel = map {
-      my $name = $_->name;
-      if ($name eq 'user-defined') {
-	$_->value->{label}.qq( ($name))
-      } else {
-	$name
-      }
-    } map { SeqV($_->{relation}) }
-      grep { $_->{target} eq $target->{name} }
-      ($type eq 'ref' ? $node : (grep $_->{'#name'} eq 'ref', $node->children));
-    my $node_type = $node->{'node-type'};
-    my $target_type = $target->{'node-type'};
-    my $relations =
-      $SEARCH && $node_type && $target_type ?
-      [ grep {
-	first { $_ eq $target_type }
-	  GetRelativeQueryNodeType($node_type,
-				   $SEARCH,
-				   CreateRelation($_))
-	} @{GetRelationTypes($node)}
-       ] : GetRelationTypes($node);
-    return unless @$relations;
-    ListQuery('Select relations',
-	      ($type eq 'ref' ? 'browse' : 'multiple'),
-	      $relations,
-	      \@sel,
-	      {
-		label => { -text=> qq{Select query-node relations to add or preserve} },
-	      }
-	     ) || return;
-    if ($type eq 'node' or $type eq 'subquery') {
-      init_id_map($node->root);
-      AddOrRemoveRelations($node,$target,\@sel,{-add_only=>0});
+    if (EditRelationFromTo($node,$target)) {
       TredMacro::Redraw_FSFile_Tree();
       ChangingFile(1);
-    } elsif ($type eq 'ref') {
-      init_id_map($node->root);
-      $node->{target}=GetNodeName($target);
-      SetRelation($node,$sel[0]) if @sel;
-      TredMacro::Redraw_FSFile_Tree();
-      ChangingFile(1);
+    } else {
+      return 'stop';
     }
   } elsif (!$mod and $node->{'#name'} eq 'node' and $target->{'#name'} =~ /^(and|or|not)$/ and !$node->{optional}) {
     $this->set_type(undef);
@@ -1336,6 +1328,54 @@ sub current_node_change_hook {
 }
 
 # Helper routines
+sub EditRelationFromTo {
+  my ($node,$target)=@_;
+  my $type = $node->{'#name'};
+  my $target_is = $target->{'#name'};
+  return unless $target_is =~/^(?:node|subquery)$/
+    and $type =~/^(?:node|subquery|ref)$/;
+  return if cmp_subquery_scope($node,$target)<0;
+  my @sel = map {
+    my $name = $_->name;
+    if ($name eq 'user-defined') {
+      $_->value->{label}.qq( ($name))
+    } else {
+      $name
+    }
+  } map { SeqV($_->{relation}) }
+    grep { $_->{target} eq $target->{name} }
+      ($type eq 'ref' ? $node : (grep $_->{'#name'} eq 'ref', $node->children));
+  my $node_type = $node->{'node-type'};
+  my $target_type = $target->{'node-type'};
+  my $relations =
+    $SEARCH && $node_type && $target_type ?
+      [ grep {
+	first { $_ eq $target_type }
+	  GetRelativeQueryNodeType($node_type,
+				   $SEARCH,
+				   CreateRelation($_))
+	} @{GetRelationTypes($node)}
+       ] : GetRelationTypes($node);
+  return unless @$relations;
+  ListQuery('Select relations',
+	    ($type eq 'ref' ? 'browse' : 'multiple'),
+	    $relations,
+	    \@sel,
+	    {
+	      label => { -text=> qq{Select query-node relations to add or preserve} },
+	    }
+	   ) || return;
+  init_id_map($node->root);
+  if ($type eq 'node' or $type eq 'subquery') {
+    AddOrRemoveRelations($node,$target,\@sel,{-add_only=>0});
+    return 1;
+  } elsif ($type eq 'ref') {
+    $node->{target}=GetNodeName($target);
+    SetRelation($node,$sel[0]) if @sel;
+    return 1 if @sel
+  }
+  return;
+}
 
 # note: you have to call init_id_map($root); first!
 sub AddOrRemoveRelations {

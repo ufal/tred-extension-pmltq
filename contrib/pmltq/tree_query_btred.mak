@@ -785,7 +785,7 @@ sub claim_search_win {
     if (length $check_preceding) {
       $check_preceding = "\n".
 	'  and ($backref or '.
-	  '($matched_nodes->['.$match_pos.']=$node) # a trick: make it appear as if this node already matched!'.
+	  '($matched_nodes->['.$match_pos.']=$node) # a trick: make it appear as if this node already matched!'."\n".
 	    $check_preceding.
 	')';
     }
