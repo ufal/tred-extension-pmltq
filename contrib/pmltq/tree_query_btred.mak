@@ -896,9 +896,10 @@ sub claim_search_win {
 	  ((length($_->{min}) ? $_->{min} : undef),
 	   (length($_->{max}) ? $_->{max} : undef)) : (1,undef)
       } TredMacro::AltV($node->{occurrences});
-      my $occ_list=
+      my $occ_list =
 	TredMacro::max(map {int($_)} @occ).','.join(',',(map { defined($_) ? $_ : 'undef' } @occ));
-      my $condition = qq/\$sub_queries[$sq_pos]->test_occurrences(\$node,$occ_list)/;
+      my $condition = q`(($backref or $matched_nodes->[`.$match_pos.q`]=$node) and `. # trick: the subquery may ask about the current node
+	qq/\$sub_queries[$sq_pos]->test_occurrences(\$node,$occ_list))/;
       my $postpone_subquery_till = $subquery->{postpone_subquery_till};
       if (defined $postpone_subquery_till) {
 	print "postponing subquery till: $postpone_subquery_till\n" if $DEBUG;
@@ -1006,13 +1007,8 @@ sub claim_search_win {
 	} else {
 	  $node='$node';
 	}
+	# FIXME: use schema to compile correctly
 	my $attr=join('/',@$pt);
-# 	## FIXME: hack: not needed once we have equality for nodes
-# 	if ($attr =~ /^(?:tag|lemma|form)/) {
-# 	  $attr='m/'.$attr; #FIXME: remove me
-# 	} else {
-# 	  $attr =~ s{^tfa/}{}; #FIXME: remove me
-# 	}
 	$attr = q`do{ my $v=`.(($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]).q`; $v=$v->[0] while ref($v) eq 'Fslib::List' or ref($v) eq 'Fslib::Alt'; $v} `;
 	return qq{ $attr };
       } elsif ($type eq 'FUNC') {
