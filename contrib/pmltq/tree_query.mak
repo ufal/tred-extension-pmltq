@@ -535,6 +535,22 @@ sub {
   SchemaName() eq 'tree_query' ? __PACKAGE__ : undef ;
 };
 
+require Tk::PNG;
+my %icons;
+sub icon {
+  my ($name)=@_;
+  return unless GUI();
+  if (ref $icons{$name}) {
+    return $icons{$name};
+  }
+  my $file = File::Spec->catfile(CallerDir(),'icons',$name.'.png');
+  if (-r $file) {
+    return $icons{$name} = ToplevelFrame()->Photo(-format => 'png', -file => $file);
+  } else {
+    return $icons{$name} = main::icon($grp->{framegroup}, $name)
+  }
+}
+
 sub allow_switch_context_hook {
   return 'stop' if SchemaName() ne 'tree_query';
 }
@@ -582,7 +598,7 @@ sub switch_context_hook {
 	 -takefocus=>0,
 	 -relief => $main::buttonsRelief,
 	 $but->[1] ? (-compound => 'top',
-		      -image => main::icon($grp->{framegroup},$but->[1]),
+		      -image => icon($but->[1]),
 		      -text  => $but->[0],
 		     ) :
 		       (
@@ -1490,10 +1506,7 @@ sub SelectSearch {
 	    -compound=>'top',
 	    -text => $b->[0],
 	    -underline => $b->[4],
-	    -image => $d->Photo(
-	      -format=>'png',
-	      -file => File::Spec->catfile(File::Spec->catpath($vol,$dir),'icons',$b->[1].'.png'),
-	     ),
+	    -image => icon($b->[1]),
 	    -highlightthickness => 3,
 	    -command => [sub { $_[0]->{selected_button}=$_[1] },$d,$b->[0]],
 	   );
@@ -1656,7 +1669,7 @@ sub CreateSearchToolbar {
 		-borderwidth => 0,
 		-takefocus=>0,
 		-relief => $main::buttonsRelief,
-		-image => main::icon($grp->{framegroup},$but->[2]),
+		-image => icon($but->[2]),
 		-compound => 'top',
 	       )->pack(-side=>'left',-padx => 5);
     AttachTooltip($b,$but->[3]);
@@ -1678,7 +1691,7 @@ sub CreateSearchToolbar {
 		-takefocus=>0,
 	      -relief => $main::buttonsRelief,
 	      -borderwidth=> $main::buttonBorderWidth,
-	      -image => main::icon($grp->{framegroup},'16x16/remove'),
+	      -image => icon('16x16/remove'),
 	      -command => MacroCallback([sub {
 					   my $ident=shift;
 					   DestroyUserToolbar($ident);
