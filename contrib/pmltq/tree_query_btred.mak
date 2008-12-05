@@ -8,28 +8,6 @@ BEGIN {
   import TredMacro;
 }
 
-# Bind sub { test(1,{one_tree=>1}); ChangingFile(0) } => {
-#   key => 's',
-#   menu => 'TrEd-based search (one tree)',
-#   context=>'Tree_Query',
-# };
-# Bind sub { test(1,{plan=>1, one_tree=>1}); ChangingFile(0) } => {
-#   key => 'P',
-#   menu => 'TrEd-based search with planner (one tree)',
-#   context=>'Tree_Query',
-# };
-# Bind sub { test(1); ChangingFile(0) } => {
-#   key => 'Ctrl+s',
-#   menu => 'TrEd-based search (all trees)',
-#   context=>'Tree_Query',
-# };
-# Bind \&test => {
-#   key => 'S',
-#   menu => 'TrEd-based search (next match)',
-#   changing_file => 0,
-#   context=>'Tree_Query',
-# };
-
 our $DEBUG;
 #ifdef TRED
 $DEBUG=1;
@@ -37,6 +15,8 @@ $DEBUG=1;
 
 my $evaluator;
 #ifndef TRED
+my $query_tree;
+my $evaluator_opts;
 sub start_hook {
   use Getopt::Long ();
   my %opts;
@@ -45,9 +25,13 @@ sub start_hook {
     'query|q=s',
     'plan|p',
   ) or die "Wrong options\n";
-  my $query_tree;
-  if (defined $opts{query}) {
-    my $query=$opts{query};
+  init_search(\%opts);
+}
+
+sub init_search {
+  my ($opts)=@_;
+  if (defined $opts->{query}) {
+    my $query=$opts->{query};
     die "Empty query\n" unless length $query;
     $query_tree=Tree_Query->parse_query($query);
     DetermineNodeType($_) for $query_tree->descendants;
@@ -62,78 +46,181 @@ sub start_hook {
 	die "Error: Query file is empty\n";
       }
     }
-    my $query_tree = $query_file->appData('id-hash')->{$query_id};
+    $query_tree = $query_file->appData('id-hash')->{$query_id};
     die "Query tree $query_fn#$query_id not found\n" unless ref $query_tree;
   }
   #  print STDERR "$query_file\n";
-  #plan_query($query_tree) if $opts{plan};
-  $evaluator = Tree_Query::BtredEvaluator->new($query_tree,{plan=>$opts{plan}});
-
+  #plan_query($query_tree) if $opts->{plan};
+  $evaluator_opts = {plan=>$opts->{plan}};
   # print STDERR "initialized @iterators, $query_pos\n";
   # print $query_node,",",$query_tree->{id},"\n";
 }
 
+sub new_evaluator {
+  $evaluator_opts->{type_mapper} ||= Tree_Query::TypeMapper->new({file=>CurrentFile()});
+  Tree_Query::BtredEvaluator->new($query_tree, $evaluator_opts);
+}
 
-sub test_btred {
+sub next_match {
+  $evaluator ||= new_evaluator(PML::Schema());
+  my $match = $evaluator->find_next_match();
+  $evaluator->reset() unless $match; # prepare for next file
+  return $match;
+}
+
+sub print_all_matches {
   my $match;
+  $evaluator ||= new_evaluator(PML::Schema());
   while ($match = $evaluator->find_next_match()) {
     print join(" ",map { $_->{id} } @$match)."\n";
   }
   $evaluator->reset(); # prepare for next file
 }
-sub test_btred_count {
+
+sub count_matches {
+  $evaluator ||= new_evaluator(PML::Schema());
   my $limit = @_ ? int(shift()) : 100;
   my $count=0;
   $count++ while $evaluator->find_next_match({boolean => 1}) and (!$limit or $count<=$limit);
   $evaluator->reset(); # prepare for next file
-  if ($limit and $count>$limit) {
-    print ">$count matches\n";
-  } else {
-    print "$count match(es)\n";
-  }
+  return $count;
 }
 
 #endif
 
-sub test {
-  # assuming the tree we get is ordered
-  my ($restart,$opts)=@_;
-  my $query_tree=$root;
-  my ($win) = grep {
-    my $fl = GetCurrentFileList($_);
-    ($fl and $fl->name eq 'Tree_Query')
-  } TrEdWindows();
-  return unless $win;
-  my $fsfile = CurrentFile($win);
-  return unless $fsfile;
-  {
-    my $cur_win = $grp;
-    $grp=$win;
-    eval {
-      print STDERR "Searching...\n" if $DEBUG;
-      $Tree_Query::btred_results=1;
-      %Tree_Query::is_match=();
-      my $one_tree = delete $opts->{one_tree};
-      if ($one_tree) {
-	$opts->{tree}=$fsfile->tree(CurrentTreeNumber($win));
-      }
-      # $opts->{fsfile} = $fsfile;
-      $evaluator = Tree_Query::BtredEvaluator->new($query_tree,$opts) if !$evaluator or $restart;
-      #  return;
-      my $match = $evaluator->find_next_match();
-      if ($match) {
-	%Tree_Query::is_match = map { $_ => 1 } @$match;
-	print join(",",map { $_->{id}.": ".$_->{functor} } @$match)."\n";
-	SetCurrentNodeInOtherWindow($win,$match->[0]);
-      }
-      print STDERR "Searching done!\n" if $DEBUG;
-      $Redraw='all';
-    };
-    $grp=$cur_win;
-  }
-  my $err = $@;
-  die $err if $err;
+# sub test {
+#   # assuming the tree we get is ordered
+#   my ($restart,$opts)=@_;
+#   my $query_tree=$root;
+#   my ($win) = grep {
+#     my $fl = GetCurrentFileList($_);
+#     ($fl and $fl->name eq 'Tree_Query')
+#   } TrEdWindows();
+#   return unless $win;
+#   my $fsfile = CurrentFile($win);
+#   return unless $fsfile;
+#   {
+#     my $cur_win = $grp;
+#     $grp=$win;
+#     eval {
+#       print STDERR "Searching...\n" if $DEBUG;
+#       $Tree_Query::btred_results=1;
+#       %Tree_Query::is_match=();
+#       my $one_tree = delete $opts->{one_tree};
+#       if ($one_tree) {
+# 	$opts->{tree}=$fsfile->tree(CurrentTreeNumber($win));
+#       }
+#       # $opts->{fsfile} = $fsfile;
+#       $evaluator = Tree_Query::BtredEvaluator->new($query_tree,$opts) if !$evaluator or $restart;
+#       #  return;
+#       my $match = $evaluator->find_next_match();
+#       if ($match) {
+# 	%Tree_Query::is_match = map { $_ => 1 } @$match;
+# 	print join(",",map { $_->{id}.": ".$_->{functor} } @$match)."\n";
+# 	SetCurrentNodeInOtherWindow($win,$match->[0]);
+#       }
+#       print STDERR "Searching done!\n" if $DEBUG;
+#       $Redraw='all';
+#     };
+#     $grp=$cur_win;
+#   }
+#   my $err = $@;
+#   die $err if $err;
+# }
+
+############################################################
+
+{
+
+package Tree_Query::TypeMapper;
+use strict;
+use warnings;
+
+BEGIN { import TredMacro  }
+
+sub new {
+  my ($class,$opts)=@_;
+  $opts||={};
+  my $what = ($opts->{file}?0:1) +
+             ($opts->{filelist}?0:1);
+  die "Neither fsfile, nor filelist were specified!" unless $what;
+  die "Options fsfile, filelist are exclusive!" if $what>1;
+  my $self = bless {
+    file => $opts->{file},
+    filelist => $opts->{filelist},
+  }, $class;
+  return $self;
 }
+
+sub get_schema_for_query_node {
+  my ($self,$node)=@_;
+  my $decl = $self->get_type_decl_for_query_node($node);
+  return $decl && $decl->schema;
+}
+sub get_schema_for_type {
+  my ($self,$type)=@_;
+  my $decl = $self->get_decl_for($type);
+  return $decl && $decl->get_schema;
+}
+
+sub _get_fsfile {
+  my ($self)=@_;
+  my $file = $self->{file};
+  my $fl;
+  if ($file) {
+    return $file if ref($file) and UNIVERSAL::isa($file,'FSFile');
+    return first { $_->filename eq $file } GetOpenFiles();
+  } elsif ($fl = GetFileList($self->{filelist})) {
+    my %fl;
+    my @files = $fl->files;
+    #    print "@files\n";
+    @fl{ @files } = ();
+    my $fsfile = ((first { exists($fl{$_->filename}) } GetOpenFiles())||
+	     $files[0] && Open(AbsolutizeFileName($files[0],$fl->filename),{-preload=>1}))
+      || return;
+    return $fsfile;
+  }
+}
+
+sub get_schema {
+  my ($self)=@_;
+  my $fsfile = $self->_get_fsfile || return;
+  return PML::Schema($fsfile);
+}
+
+sub get_schemas {
+  my ($self)=@_;
+  my $fsfile = $self->_get_fsfile || return;
+  return uniq map PML::Schema($_), ($fsfile,  GetSecondaryFiles($fsfile));
+}
+
+sub get_type_decl_for_query_node {
+  my ($self,$node)=@_;
+  return $self->get_decl_for(Tree_Query::Common::GetQueryNodeType($node));
+}
+
+sub get_decl_for {
+  my ($self,$type)=@_;
+  $type=~s{(/|$)}{.type$1};
+  for my $schema ($self->get_schemas) {
+    my $decl = $schema->find_type_by_path('!'.$type);
+    return $decl if $decl;
+  }
+  warn "Did not find type '!$type'";
+  return;
+}
+
+sub get_node_types {
+  my ($self)=@_;
+  return [map Tree_Query::Common::DeclToQueryType( $_ ), map $_->node_types, $self->get_schemas];
+}
+
+
+1;
+
+}
+
+############################################################
 
 {
 
@@ -144,23 +231,16 @@ use strict;
 use warnings;
 BEGIN { import TredMacro  }
 
+use base qw(Tree_Query::TypeMapper);
+
 $Tree_Query::TrEdSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
 
 sub new {
   my ($class,$opts)=@_;
   $opts||={};
-  my $what = ($opts->{file}?0:1) +
-             ($opts->{filelist}?0:1);
-  die "Neither fsfile, nor filelist were specified!" unless $what;
-  die "Options fsfile, filelist are exclusive!" if $what>1;
-  my $self = bless {
-    object_id =>  $Tree_Query::TrEdSearchPreserve::object_id++,
-    file => $opts->{file},
-    filelist => $opts->{filelist},
-    evaluator => undef,
-    query => undef,
-    results => undef,
-  }, $class;
+  my $self = $class->SUPER::new($opts);
+  $self->{object_id} =  $Tree_Query::TrEdSearchPreserve::object_id++;
+  $self->{$_} = undef for qw(evaluator query results); # create keys but leave undefined
   my $ident = $self->identify;
   Tree_Query::CreateSearchToolbar($ident);
   (undef, $self->{label}) = Tree_Query::CreateSearchToolbar($ident);
@@ -203,7 +283,10 @@ sub search_first {
   my $query = $opts->{query} || $root;
   $self->{query}=$query;
   $self->{evaluator} = Tree_Query::BtredEvaluator->new($query,
-						      {current_filelist => $self->{filelist} ? 1 : 0});
+						      {
+							type_mapper => $self,
+							current_filelist => $self->{filelist} ? 1 : 0
+						      });
   $self->{current_result} = undef;
   $self->{past_results}=[];
   $self->{next_results}=[];
@@ -360,70 +443,6 @@ sub select_matching_node {
   return;
 }
 
-sub get_schema_for_query_node {
-  my ($self,$node)=@_;
-  my $decl = $self->get_type_decl_for_query_node($node);
-  return $decl && $decl->schema;
-}
-sub get_schema_for_type {
-  my ($self,$type)=@_;
-  my $decl = $self->get_decl_for($type);
-  return $decl && $decl->get_schema;
-}
-
-sub _get_fsfile {
-  my ($self)=@_;
-  my $file = $self->{file};
-  my $fl;
-  if ($file) {
-    return first { $_->filename eq $file } GetOpenFiles();
-  } elsif ($fl = GetFileList($self->{filelist})) {
-    my %fl;
-    my @files = $fl->files;
-    print "@files\n";
-    @fl{ @files } = ();
-    my $fsfile = ((first { exists($fl{$_->filename}) } GetOpenFiles())||
-	     $files[0] && Open(AbsolutizeFileName($files[0],$fl->filename),{-preload=>1}))
-      || return;
-    return $fsfile;
-  }
-}
-
-sub get_schema {
-  my ($self)=@_;
-  my $fsfile = $self->_get_fsfile || return;
-  return PML::Schema($fsfile);
-}
-
-sub get_schemas {
-  my ($self)=@_;
-  my $fsfile = $self->_get_fsfile || return;
-  return uniq map PML::Schema($_), ($fsfile,  GetSecondaryFiles($fsfile));
-}
-
-sub get_type_decl_for_query_node {
-  my ($self,$node)=@_;
-  return $self->get_decl_for(Tree_Query::Common::GetQueryNodeType($node));
-}
-
-sub get_decl_for {
-  my ($self,$type)=@_;
-  $type=~s{(/|$)}{.type$1};
-  for my $schema ($self->get_schemas) {
-    my $decl = $schema->find_type_by_path('!'.$type);
-    return $decl if $decl;
-  }
-  warn "Did not find type '!$type'";
-  return;
-}
-
-sub get_node_types {
-  my ($self)=@_;
-  return [map Tree_Query::Common::DeclToQueryType( $_ ), map $_->node_types, $self->get_schemas];
-}
-
-
-
 ######## Private
 
 sub claim_search_win {
@@ -459,10 +478,11 @@ sub claim_search_win {
 ###########################################
 {
   package Tree_Query::BtredEvaluator;
-
+  use Carp;
   use strict;
   use Scalar::Util qw(weaken);
   use List::Util qw(first);
+  import TredMacro qw(SeqV);
 
   my %test_relation = (
     'parent' => q($start->parent == $end),
@@ -506,7 +526,6 @@ sub claim_search_win {
     }
 
     $opts ||= {};
-
     #######################
     # The following lexical variables may be used directly by the
     # condition subroutines
@@ -524,7 +543,6 @@ sub claim_search_win {
     my %name2pos;
     # maps node position in a (sub)query to a position of the matching node in $matched_nodes
     # we avoid using hashes for efficiency
-
     my $self = bless {
 
       query_pos => 0,
@@ -541,6 +559,8 @@ sub claim_search_win {
 
       matched_nodes => $matched_nodes, # nodes matched so far (incl. nodes in subqueries; used for evaluation of cross-query relations)
 
+      type_mapper => $opts->{type_mapper},
+
       name2pos => \%name2pos,
       parent_pos => undef,
       pos2match_pos => undef,
@@ -548,6 +568,7 @@ sub claim_search_win {
       # query_nodes => [],
       results => [],
     }, $class;
+    croak(__PACKAGE__."->new: missing required option: type_mapper") unless $self->{type_mapper};
     weaken($self->{parent_query}) if $self->{parent_query};
     $query_pos = \$self->{query_pos};
 
@@ -614,13 +635,43 @@ sub claim_search_win {
 	($self->{parent_query} ? (%{$self->{parent_query}{name2match_pos}}) : ()),
 	map { $_ => $self->{pos2match_pos}[$name2pos{$_}] } keys %name2pos
       };
+
+      my %node_types = map { $_=> 1 } @{$self->{type_mapper}->get_node_types};
+      my $default_type = $query_node->root->{'node-type'};
+      if ($default_type and !$node_types{$default_type}) {
+	die "The query specifies an invalid type '$default_type' as default node type!";
+      }
+      for my $node (@all_query_nodes) {
+	if ($node->{'node-type'}) {
+	  if (!$node_types{$node->{'node-type'}}) {
+	    die "The query specifies an invalid type '$node->{'node-type'}' for node: ".Tree_Query::Common::as_text($node)."\n";
+	  }
+	} else {
+	  my $parent = $node->parent;
+	  my @types =
+	    $parent ?
+	      (Tree_Query::Common::GetRelativeQueryNodeType(
+		$parent->{'node-type'},
+		$self->{type_mapper},
+		SeqV($node->{relation}))
+	       ) : @{$self->{type_mapper}->get_node_types};
+	  if (@types == 1) {
+	    $node->{'node-type'} = $types[0];
+	  } elsif ($default_type) {
+	    $node->{'node-type'} = $default_type;
+	  } else {
+	    die "Could not determine node type of node "
+	      .Tree_Query::Common::as_text($node)."\n"
+		."Possible types are: ".join(',',@types)." !\n";
+	  }
+	}
+      }
     }
 
     # compile condition testing functions and create iterators
     my (@r1,@r2,@r3);
     for my $i (0..$#query_nodes) {
       my $qn = $query_nodes[$i];
-
       my $sub = $self->serialize_conditions($qn,{
 	query_pos => $i,
 	recompute_condition => \@r1, # appended in recursion
@@ -874,6 +925,8 @@ sub claim_search_win {
 	    %$opts,
 	    negative => $negative,
 	    name => $_->{'#name'},
+	    id => $node->{name},
+	    type => $node->{'node-type'},
 	    condition => $_,
 	  })
 	} grep { $_->{'#name'} ne 'node' } $node->children;
@@ -885,6 +938,7 @@ sub claim_search_win {
       }
     } elsif ($name eq 'subquery') {
       my $subquery = ref($self)->new($node, {
+	type_mapper => $self->{type_mapper},
 	parent_query => $self,
 	parent_query_pos => $pos,
 	parent_query_match_pos => $match_pos,
@@ -1008,8 +1062,15 @@ sub claim_search_win {
 	  $node='$node';
 	}
 	# FIXME: use schema to compile correctly
+
+	#my $pos = $opts->{query_pos};
+	#my $match_pos = $self->{pos2match_pos}[$pos];
+	
+
 	my $attr=join('/',@$pt);
-	$attr = q`do{ my $v=`.(($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]).q`; $v=$v->[0] while ref($v) eq 'Fslib::List' or ref($v) eq 'Fslib::Alt'; $v} `;
+#	$attr = q`do{ my $v=`.(($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]).q`; $v=$v->[0] while ref($v) eq 'Fslib::List' or ref($v) eq 'Fslib::Alt'; $v} `;
+	$attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
+
 	return qq{ $attr };
       } elsif ($type eq 'FUNC') {
 	my $name = $pt->[0];
