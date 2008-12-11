@@ -786,8 +786,8 @@ END
   }
   GotoTree(scalar(GetTrees()));
   SelectSearch() || return;
-  DetermineNodeType(NewTreeAfter()) if ($root->children);
-  $root->{id}=$id;
+  DetermineNodeType(NewTreeAfter()) if !$root or $root->children;
+  $root->{id}=$id if $root;
   ChangingFile(0);
 }
 
