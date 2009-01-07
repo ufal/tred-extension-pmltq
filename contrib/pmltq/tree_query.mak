@@ -535,9 +535,9 @@ sub {
   SchemaName() eq 'tree_query' ? __PACKAGE__ : undef ;
 };
 
-require Tk::PNG;
 my %icons;
 sub icon {
+  require Tk::PNG;
   my ($name)=@_;
   return unless GUI();
   if (ref $icons{$name}) {
