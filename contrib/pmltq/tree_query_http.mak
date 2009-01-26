@@ -404,7 +404,6 @@ sub get_node_types {
 sub configure {
   my ($self)=@_;
   my $config = $self->{config}{pml};
-  local $main::sortAttrs=0;
   GUI() && edit_config('Edit configuration',
 		       $config->get_root,
 		       $config->get_schema->get_root_decl->get_content_decl,
@@ -543,7 +542,6 @@ sub init {
   my $cfg;
   if ($id eq ' CREATE NEW CONNECTION ') {
     $cfg = Fslib::Struct->new();
-    local $main::sortAttrs=0;
     GUI() && edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
     $cfgs->push_element('http',$cfg);
     $self->{config}{pml}->save();
@@ -555,7 +553,6 @@ sub init {
   $self->{config}{id} = $id;
   unless (defined $cfg->{url}) {
     if (GUI()) {
-      local $main::sortAttrs=0;
       edit_config('Edit connection',$cfg,$cfg_type,'password') || return;
     } else {
       die "The configuration $id does not specify a URL\n";
