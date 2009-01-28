@@ -432,11 +432,13 @@ sub select_matching_node {
     my $pos = $1;
     my $r=$fsfile->tree($win->{treeNo});
     for (1..$pos) {
-      $r=$r->following();
+      $r=$r && $r->following();
     }
     if ($r) {
       EnableMinorMode('Tree_Query_Results',$win);
       SetCurrentNodeInOtherWin($win,$r);
+      $Redraw='none';
+      Redraw($win);
       CenterOtherWinTo($win,$r);
     }
   }
@@ -483,6 +485,7 @@ sub claim_search_win {
   use Scalar::Util qw(weaken);
   use List::Util qw(first);
   import TredMacro qw(SeqV);
+  use PMLSchema;
 
   my %test_relation = (
     'parent' => q($start->parent == $end),
@@ -1065,9 +1068,63 @@ sub claim_search_win {
 
 	#my $pos = $opts->{query_pos};
 	#my $match_pos = $self->{pos2match_pos}[$pos];
-	
 
 	my $attr=join('/',@$pt);
+	my $type_decl = $self->{type_mapper}->get_decl_for($opts->{type});
+	my $decl = $type_decl;
+
+	my $foreach = $opts->{foreach} ||= [];
+	my $pexp=$node;
+	for my $step (@$pt) {
+	  print STDERR $decl->get_decl_type_str,"\n";
+	  my $decl_is = $decl->get_decl_type;
+	  if ($decl_is == PML_STRUCTURE_DECL or $decl_is == PML_CONTAINER_DECL) {
+	    my $m = $decl->get_member_by_name($step);
+	    if (defined $m) {
+	      $decl=$m->get_content_decl;
+	    } else {
+	      $m = $decl->get_member_by_name($step.'.rf');
+	      if ($m and (($m->get_role||'') eq '#KNIT' or ($m->get_content_decl->get_role||'') eq '#KNIT')) {
+		$decl=$m->get_knit_content_decl;
+	      } else {
+		die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find member '$step'\n" unless defined($m);
+	      }
+	    }
+	    #
+	    # value
+	    #
+	    push @$foreach, '('.$pexp.'->{qq('.quotemeta($step).')})||()';
+	    # $pexp.='->{qq('.quotemeta($step).')}';
+	    $pexp = '$var'.$#$foreach;
+	  } elsif ($decl_is == PML_SEQUENCE_DECL) {
+	    my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find element '$step'\n";
+	    $decl = $e->get_content_decl;
+	    push @$foreach, $pexp.'->values(qq('.quotemeta($step).'))';
+	    $pexp = '$var'.$#$foreach;
+	  } elsif ($decl_is == PML_LIST_DECL) {
+	    $decl = $decl->get_content_decl;
+	    push @$foreach, '@{'.$pexp.'}';
+	    $pexp = '$var'.$#$foreach;
+	  } elsif ($decl_is == PML_ALT_DECL) {
+	    $decl = $decl->get_content_decl;
+	    push @$foreach, 'AltV('.$pexp.')';
+	    $pexp = '$var'.$#$foreach;
+	  } else {
+	    die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' for an atomic type!\n";
+	  }
+	}
+	if ($ENV{TRED_DEVEL}) {
+	  print STDERR "----\n";
+	  print STDERR "ATTR: $attr\n";
+	  print STDERR "PEXP: $pexp\n";
+	  for my $i (0..$#$foreach) {
+	    print STDERR (' ' x $i).q`foreach my $var`.$i.qq` ($foreach->[$i]) {`."\n";
+	  }
+	  for my $i (reverse 0..$#$foreach) {
+	    print STDERR (' ' x $i).q`}` ."\n";
+	  }
+	  print STDERR "----\n";
+	}
 #	$attr = q`do{ my $v=`.(($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]).q`; $v=$v->[0] while ref($v) eq 'Fslib::List' or ref($v) eq 'Fslib::Alt'; $v} `;
 	$attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
 
