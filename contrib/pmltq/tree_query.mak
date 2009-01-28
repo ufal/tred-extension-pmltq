@@ -36,7 +36,11 @@ register_reload_macros_hook(sub{
 Bind 'Tree_Query->NewQuery' => {
   context => 'TredMacro',
   key => 'Shift+F3',
-  menu => 'New Tree Query',
+  menu => '__* Start Tree Query',
+};
+Bind 'Tree_Query->NewQuery' => {
+  key => 'Shift+F3',
+  menu => '__* Start Tree Query',
 };
 our $ng_string;
 
