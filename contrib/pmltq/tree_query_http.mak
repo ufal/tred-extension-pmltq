@@ -442,6 +442,16 @@ sub get_decl_for {
   return $self->{type_decls}{$type} ||= Tree_Query::Common::QueryTypeToDecl($type,$self->get_schema($self->get_schema_name_for($type)));
 }
 
+sub get_specific_relations {
+  my ($self)=@_;
+  my $res = $self->request('relations',[format=>'text']);
+  unless ($res->is_success) {
+    ErrorMessage($res->status_line, "\n");
+    return;
+  }
+  return [ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
+}
+
 #########################################
 #### Private API
 

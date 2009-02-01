@@ -1989,6 +1989,7 @@ sub EditQuery {
   while ( defined ($string = EditBoxQuery('Edit query node', $string, '',$qopts)) ) {
     my $t0 = new Benchmark;
     eval {
+      local $Tree_Query::specific_relations = join('|',@{$SEARCH->get_specific_relations()});
       if (!$node->parent) {
 	$result=$parser->parse_query($string);
       } elsif ($node->{'#name'} eq 'node') {

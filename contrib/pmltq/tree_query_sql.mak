@@ -327,6 +327,11 @@ sub get_decl_for {
   return $ev->get_decl_for($type);
 }
 
+sub get_specific_relations {
+  my ($self)=@_;
+  return Tree_Query::Common::specific_relations();
+}
+
 #########################################
 #### Private API
 

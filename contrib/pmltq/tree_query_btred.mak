@@ -33,6 +33,7 @@ sub init_search {
   if (defined $opts->{query}) {
     my $query=$opts->{query};
     die "Empty query\n" unless length $query;
+    # FIXME: specific_relations
     $query_tree=Tree_Query->parse_query($query);
     DetermineNodeType($_) for $query_tree->descendants;
     print STDERR "Parsed $query\n";
@@ -215,6 +216,9 @@ sub get_node_types {
   return [map Tree_Query::Common::DeclToQueryType( $_ ), map $_->node_types, $self->get_schemas];
 }
 
+sub get_specific_relations {
+  return Tree_Query::Common::specific_relations();
+}
 
 1;
 
@@ -520,14 +524,6 @@ sub claim_search_win {
   sub new {
     my ($class,$query_tree,$opts)=@_;
 
-    my $clone_before_plan = 0;
-    if (ref($query_tree)) {
-      $clone_before_plan = 1;
-    } else {
-      $query_tree = Tree_Query->parse_query($query_tree);
-      TredMacro::DetermineNodeType($_) for $query_tree->descendants;
-    }
-
     $opts ||= {};
     #######################
     # The following lexical variables may be used directly by the
@@ -574,6 +570,16 @@ sub claim_search_win {
     croak(__PACKAGE__."->new: missing required option: type_mapper") unless $self->{type_mapper};
     weaken($self->{parent_query}) if $self->{parent_query};
     $query_pos = \$self->{query_pos};
+
+
+    my $clone_before_plan = 0;
+    if (ref($query_tree)) {
+      $clone_before_plan = 1;
+    } else {
+      local $Tree_Query::specific_relations = join('|',@{$self->{type_mapper}->get_specific_relations()});
+      $query_tree = Tree_Query->parse_query($query_tree);
+      TredMacro::DetermineNodeType($_) for $query_tree->descendants;
+    }
 
     my $type = $query_tree->type->get_base_type_name;
     unless ($type eq 'q-query.type' or
