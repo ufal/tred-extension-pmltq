@@ -7,17 +7,7 @@
   <root name="tree_query" type="q-tree_query.type"/>
 
   <type name="q-user-relation-choice.type">
-    <choice>
-      <value>echild</value> <!-- PDT specific -->
-      <value>eparent</value> <!-- PDT specific -->
-      <value>a/lex.rf</value> <!-- PDT specific -->
-      <value>a/aux.rf</value> <!-- PDT specific -->
-      <value>a/lex.rf|a/aux.rf</value> <!-- PDT specific -->
-      <value>coref_text</value> <!-- PDT specific -->
-      <value>coref_gram</value> <!-- PDT specific -->
-      <value>compl</value> <!-- PDT specific -->
-      <value>val_frame.rf</value> <!-- PDT specific -->
-    </choice>
+    <cdata format="token"/>
   </type>
   <derive name="q-ref-user-relation-choice.type" type="q-user-relation-choice.type">
     <choice>

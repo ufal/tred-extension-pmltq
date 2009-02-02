@@ -687,7 +687,7 @@ style: <?
       } SeqV($this->{relation});
       $rel||='child';
       my $color = Tree_Query::arrow_color($rel);
-      my $arrow = Tree_Query::arrow($rel) || 'last';
+      my $arrow = Tree_Query::arrow($rel);
       "#{Line-arrow:$arrow}".
       (defined($color) ? "#{Line-fill:$color}" : '').
       ($name eq 'ref' and defined($color) ? "#{Oval-outline:$color}#{Oval-fill:$color}" : '').
@@ -1055,22 +1055,22 @@ my %color = (
   'depth-first-follows' => 'red4',
   'order-precedes' => 'orange',
   'order-follows' => 'orange3',
-  'a/lex.rf' => 'violet',
-  'a/aux.rf' => 'thistle',
-  'a/lex.rf|a/aux.rf' => 'tan',
-  'p/terminal.rf' => 'navy',
-  'p/nonterminals.rf' => 'darkgreen',
+  # 'a/lex.rf' => 'violet',
+  # 'a/aux.rf' => 'thistle',
+  # 'a/lex.rf|a/aux.rf' => 'tan',
+  # 'p/terminal.rf' => 'navy',
+  # 'p/nonterminals.rf' => 'darkgreen',
+  # 'val_frame.rf' => 'cyan',
+  # 'coref_text' => '#4C509F',
+  # 'coref_gram' => '#C05633',
+  # 'compl' => '#629F52',
+  # 'echild' => '#22aa22',
+  # 'eparent' => 'green',
 
-  'val_frame.rf' => 'cyan',
-  'coref_text' => '#4C509F',
-  'coref_gram' => '#C05633',
-  'compl' => '#629F52',
   'descendant' => 'blue',
   'ancestor' => 'lightblue',
   'child' => 'black',
   'parent' => 'lightgray',
-  'echild' => '#22aa22',
-  'eparent' => 'green',
 );
 my %arrow = (
   'same-tree-as' => 'first',
@@ -1078,30 +1078,37 @@ my %arrow = (
   'depth-first-follows' => 'first',
   'order-precedes' => 'first',
   'order-follows' => 'first',
-  'a/lex.rf' => 'first',
-  'a/aux.rf' => 'first',
-  'a/lex.rf|a/aux.rf' => 'first',
-  'p/terminal.rf' => 'first',
-  'p/nonterminals.rf' => 'first',
-  'val_frame.rf' => 'first',
-  'coref_text' => 'first',
-  'coref_gram' => 'first',
-  'compl' => 'first',
   'descendant' => 'first',
   'ancestor' => 'first',
   'child' => 'first',
   'parent' => 'first',
-  'echild' => 'first',
-  'eparent' => 'first',
+
+  # 'a/lex.rf' => 'first',
+  # 'a/aux.rf' => 'first',
+  # 'a/lex.rf|a/aux.rf' => 'first',
+  # 'p/terminal.rf' => 'first',
+  # 'p/nonterminals.rf' => 'first',
+  # 'val_frame.rf' => 'first',
+  # 'coref_text' => 'first',
+  # 'coref_gram' => 'first',
+  # 'compl' => 'first',
+  # 'echild' => 'first',
+  # 'eparent' => 'first',
 );
 
+my $free_arrow_color = 0;
+my %assigned_colors;
 sub arrow_color {
   my $rel = shift;
-  return $color{$rel};
+  my $color = $color{$rel} || $assigned_colors{$rel};
+  return $color if defined $color;
+  $assigned_colors{$rel} = $color = '#'.$colors[$free_arrow_color];
+  $free_arrow_color=($free_arrow_color+1) % scalar(@colors);
+  return $color;
 }
 sub arrow {
   my $rel = shift;
-  return $arrow{$rel};
+  return $arrow{$rel} || 'first';
 }
 
 sub get_nodelist_hook {
@@ -1215,15 +1222,15 @@ sub after_redraw_hook {
   for my $r ( sort keys %legend ) {
     my ($negate,$name) = ($r=~/^(!?\s*)(\S+)/);
     $c->createLine($scale * 75, $y, $scale * 15, $y,
-		   -fill => $color{$name},
+		   -fill => arrow_color($name),
 		   -width => 3*$scale,
 		   (-dash => $negate ? '-' : ''),
-		   -arrow => $arrow{$name}||'last',
+		   -arrow => $arrow{$name}||'first',
 		   -arrowshape => [14,20,4],
 		   -tags => ['scale_width','legend']
 		  );
     $c->createText($scale * 85, $y, -font => ($tv->get_scaled_font || $tv->get_font),
-		   # -fill => $color{$name},
+		   # -fill => arrow_color($name),
 		   -text=> $r, -anchor=>'w', -tags=>['legend','text_item'] );
     $y+=$scale * $fh;
   }
