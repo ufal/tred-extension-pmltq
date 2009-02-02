@@ -447,7 +447,7 @@ sub get_specific_relations {
   my $res = $self->request('relations',[format=>'text']);
   unless ($res->is_success) {
     ErrorMessage($res->status_line, "\n");
-    return;
+    return [];
   }
   return [ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
 }

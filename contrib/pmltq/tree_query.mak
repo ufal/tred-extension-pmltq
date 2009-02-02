@@ -993,8 +993,8 @@ sub AssignRelation {
 	@{[GetRelativeQueryNodeType($node_type,
 				 $SEARCH,
 				 CreateRelation($_))]}>0
-      } @{GetRelationTypes($node)}
-     ] : GetRelationTypes($node);
+      } @{GetRelationTypes($node,$SEARCH)}
+     ] : GetRelationTypes($node,$SEARCH);
   return unless @$relations;
   ListQuery('Select relation',
 	    'browse',
@@ -1374,8 +1374,8 @@ sub EditRelationFromTo {
 	  GetRelativeQueryNodeType($node_type,
 				   $SEARCH,
 				   CreateRelation($_))
-	} @{GetRelationTypes($node)}
-       ] : GetRelationTypes($node);
+	} @{GetRelationTypes($node,$SEARCH)}
+       ] : GetRelationTypes($node,$SEARCH);
   return unless @$relations;
   ListQuery('Select relations',
 	    ($type eq 'ref' ? 'browse' : 'multiple'),
@@ -1836,7 +1836,7 @@ sub EditQuery {
 							} @{GetRelationTypes($this)}
 						       ];
 			} else {
-			  $relations = GetRelationTypes($this);
+			  $relations = GetRelationTypes($this,$SEARCH);
 			}
 			return unless @$relations;
 			my @sel=['child'];
