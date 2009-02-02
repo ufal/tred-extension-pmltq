@@ -444,13 +444,33 @@ sub get_decl_for {
 
 sub get_specific_relations {
   my ($self)=@_;
+  return $self->{specific_relations} if $self->{specific_relations};
   my $res = $self->request('relations',[format=>'text']);
   unless ($res->is_success) {
     ErrorMessage($res->status_line, "\n");
     return [];
   }
-  return [ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
+  return $self->{specific_relations}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
 }
+
+sub get_relation_target_type {
+  my ($self,$node_type,$relation)=@_;
+  my $rels = $self->{specific_relation_map};
+  unless ($rels) {
+    my $res = $self->request('relation_target_types',[format=>'text']);
+    unless ($res->is_success) {
+      ErrorMessage($res->status_line, "\n");
+      return;
+    }
+    $self->{specific_relation_map} = $rels = {};
+    for my $line (split /\r?\n/, Encode::decode_utf8($res->content,1)) {
+      my ($type,$rel,$target)=split /:/,$_,3;
+      $rels->{$type}{$rel}=$target;
+    }
+  }
+  return $rels->{$node_type}{$relation};
+}
+
 
 #########################################
 #### Private API

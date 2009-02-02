@@ -329,7 +329,14 @@ sub get_decl_for {
 
 sub get_specific_relations {
   my ($self)=@_;
-  return Tree_Query::Common::specific_relations();
+  my $ev = $self->init_evaluator;
+  return $ev->get_specific_relations;
+}
+
+sub get_relation_target_type {
+  my $self = shift;
+  my $ev = $self->init_evaluator;
+  return $ev->get_relation_target_type(@_);
 }
 
 #########################################

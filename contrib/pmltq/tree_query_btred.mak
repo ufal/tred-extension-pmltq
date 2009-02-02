@@ -220,6 +220,44 @@ sub get_specific_relations {
   return Tree_Query::Common::specific_relations();
 }
 
+my %user_defined_relations = (
+  't-root' => {
+  },
+  't-node' => {
+    'a/lex.rf|a/aux.rf' => 'a-node',
+    'echild' => 't-node',
+    'eparent' => 't-node',
+  },
+  'a-node' => {
+    'echild' => 'a-node',
+    'eparent' => 'a-node',
+  },
+);
+
+my %specific_relations = (
+  't-root' => {
+    'a/lex.rf' => 'a-root',
+  },
+  't-node' => {
+    'a/lex.rf' => 'a-node',
+    'a/aux.rf' => 'a-node',
+    'val_frame.rf' => 'v-frame',
+    'coref_text' => 't-node',
+    'coref_gram' => 't-node',
+    'compl' => 't-node',
+  },
+  'a-node' => {
+    'p/terminal.rf' => 'english_p_terminal',
+    'p/nonterminals.rf' => 'english_p_nonterminal',
+  },
+);
+
+sub get_relation_target_type {
+  my ($self,$node_type,$relation)=@_;
+  return $specific_relations{$node_type} && $specific_relations{$node_type}{$relation}
+           || $user_defined_relations{$node_type} && $user_defined_relations{$node_type}{$relation};
+}
+
 1;
 
 }
