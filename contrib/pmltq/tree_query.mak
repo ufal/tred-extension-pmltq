@@ -687,8 +687,8 @@ style: <?
       } SeqV($this->{relation});
       $rel||='child';
       my $color = Tree_Query::arrow_color($rel);
-      my $arrow = Tree_Query::arrow($rel);
-      (defined($arrow) ? "#{Line-arrow:$arrow}" : '').
+      my $arrow = Tree_Query::arrow($rel) || 'last';
+      "#{Line-arrow:$arrow}".
       (defined($color) ? "#{Line-fill:$color}" : '').
       ($name eq 'ref' and defined($color) ? "#{Oval-outline:$color}#{Oval-fill:$color}" : '').
       '#{Line-tag:relation}'
@@ -991,10 +991,10 @@ sub AssignRelation {
     $SEARCH && $node_type ?
       [ grep {
 	@{[GetRelativeQueryNodeType($node_type,
-				 $SEARCH,
-				 CreateRelation($_))]}>0
-      } @{GetRelationTypes($node,$SEARCH)}
-     ] : GetRelationTypes($node,$SEARCH);
+				    $SEARCH,
+				    CreateRelation($_))]}>0
+				  } @{GetRelationTypes($node,$SEARCH)}
+				 ] : GetRelationTypes($node,$SEARCH);
   return unless @$relations;
   ListQuery('Select relation',
 	    'browse',
@@ -1218,7 +1218,7 @@ sub after_redraw_hook {
 		   -fill => $color{$name},
 		   -width => 3*$scale,
 		   (-dash => $negate ? '-' : ''),
-		   -arrow => $arrow{$name},
+		   -arrow => $arrow{$name}||'last',
 		   -arrowshape => [14,20,4],
 		   -tags => ['scale_width','legend']
 		  );

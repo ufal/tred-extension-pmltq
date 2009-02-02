@@ -464,7 +464,7 @@ sub get_relation_target_type {
     }
     $self->{specific_relation_map} = $rels = {};
     for my $line (split /\r?\n/, Encode::decode_utf8($res->content,1)) {
-      my ($type,$rel,$target)=split /:/,$_,3;
+      my ($type,$rel,$target)=split /:/,$line,3;
       $rels->{$type}{$rel}=$target;
     }
   }
