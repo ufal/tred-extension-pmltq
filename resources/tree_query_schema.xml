@@ -9,10 +9,9 @@
   <type name="q-user-relation-choice.type">
     <cdata format="token"/>
   </type>
-  <derive name="q-ref-user-relation-choice.type" type="q-user-relation-choice.type">
-    <choice>
-    </choice>
-  </derive>
+  <type name="q-ref-user-relation-choice.type">
+    <cdata format="token"/>
+  </type>
 
   <type name="q-base-relation.type">
     <container/>
