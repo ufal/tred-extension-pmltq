@@ -217,7 +217,7 @@ sub get_node_types {
 }
 
 sub get_specific_relations {
-  return Tree_Query::Common::specific_relations();
+  return [qw(echild eparent a/lex.rf\ a/aux.rf a/lex.rf a/aux.rf coref_text.rf coref_gram.rf compl.rf val_frame.rf)]
 }
 
 my %user_defined_relations = (
@@ -242,9 +242,9 @@ my %specific_relations = (
     'a/lex.rf' => 'a-node',
     'a/aux.rf' => 'a-node',
     'val_frame.rf' => 'v-frame',
-    'coref_text' => 't-node',
-    'coref_gram' => 't-node',
-    'compl' => 't-node',
+    'coref_text.rf' => 't-node',
+    'coref_gram.rf' => 't-node',
+    'compl.rf' => 't-node',
   },
   'a-node' => {
     'p/terminal.rf' => 'english_p_terminal',
@@ -553,9 +553,9 @@ sub claim_search_win {
     'a/lex.rf|a/aux.rf' => q(grep $_ eq $end->{id}, GetANodeIDs()),
     'a/lex.rf' => q(do { my $id=$start->attr('a/lex.rf'); $id=~s/^.*?#//; $id  eq $end->{id} } ),
     'a/aux.rf' => q(grep { my $id=$_; $id=~s/^.*?#//; $id eq $end->{id} } TredMacro::ListV($start->attr('a/lex.rf'))),
-    'coref_text' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_text.rf'})),
-    'coref_gram' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_gram.rf'})),
-    'compl' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'compl.rf'})),
+    'coref_text.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_text.rf'})),
+    'coref_gram.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_gram.rf'})),
+    'compl.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'compl.rf'})),
    );
 
 
@@ -820,11 +820,11 @@ sub claim_search_win {
 	$iterator = ALexRFIterator->new($conditions);
       } elsif ($rel->value->{label} eq 'a/lex.rf|a/aux.rf') {
 	$iterator = ALexOrAuxRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'coref_text') {
+      } elsif ($rel->value->{label} eq 'coref_text.rf') {
 	$iterator = CorefTextRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'coref_gram') {
+      } elsif ($rel->value->{label} eq 'coref_gram.rf') {
 	$iterator = CorefGramRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'compl') {
+      } elsif ($rel->value->{label} eq 'compl.rf') {
 	$iterator = ComplRFIterator->new($conditions);
       } elsif ($rel->value->{label} eq 'echild') {
 	$iterator = EChildIterator->new($conditions);
@@ -1422,9 +1422,9 @@ sub claim_search_win {
     'user-defined:a/lex.rf|a/aux.rf' => 2,
     'user-defined:a/lex.rf' => 1,
     'user-defined:a/aux.rf' => 2,
-    'user-defined:coref_text' => 1,
-    'user-defined:coref_gram' => 1,
-    'user-defined:compl' => 1,
+    'user-defined:coref_text.rf' => 1,
+    'user-defined:coref_gram.rf' => 1,
+    'user-defined:compl.rf' => 1,
     'descendant' => 30,
     'ancestor' => 8,
     'parent' => 0.5,

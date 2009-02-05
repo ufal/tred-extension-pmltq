@@ -509,7 +509,7 @@ BFFF00 E68FAC 00FFFF FFAAFF 996515 f3f6bdcb15f4
 ADDFAD FFCBA4 007BA7 CC99CC B1A171 dddd00
 6B8E23 FF8855 9BDDFF FF00FF 654321 FFFACD
 00FF00 FF2400 1560BD 997A8D cd0da2373d4f FFFF77
-D0EA2B b7ce1c6b0d0c E2F9FF  c1881d075743  0247FE 
+D0EA2B b7ce1c6b0d0c E2F9FF  c1881d075743  0247FE
 );
 
 
@@ -634,7 +634,6 @@ sub RenewStylesheets {
   SaveStylesheets();
 }
 
-our $__color_idx;
 sub CreateStylesheets{
   unless(StylesheetExists('Tree_Query')){
     SetStylesheetPatterns(<<'EOF','Tree_Query',1);
@@ -643,7 +642,6 @@ hint:
 rootstyle:#{balance:1}#{Node-textalign:center}#{NodeLabel-halign:center}
 rootstyle: #{vertical:0}#{nodeXSkip:40}#{skipHiddenLevels:1}
 rootstyle: #{NodeLabel-skipempty:1}#{CurrentOval-width:3}#{CurrentOval-outline:red}
-rootstyle: <? $Tree_Query::__color_idx=0;$Tree_Query::__color_idx2=1 ?>
 node: <? !$this->parent ? "Tree Query" : () ?>
 node: <?length($${id}) ? ' #{blue(}${id}#{)} ' : '' 
 ?><? 
@@ -1048,55 +1046,38 @@ sub AssignType {
 # (and hence $ref can be referred to from $id)
 # returns -1 otherwise
 
+my %arrow = (
+  # relation => 'first|last|both|none', # defaults to first
+);
 
+# TODO: allow these colors to be defined by user
 my %color = (
+  'child' => 'black',
+  'parent' => 'lightgray',
+  'descendant' => 'blue',
+  'ancestor' => 'lightblue',
   'same-tree-as' => 'gray',
   'depth-first-precedes' => 'red3',
   'depth-first-follows' => 'red4',
   'order-precedes' => 'orange',
   'order-follows' => 'orange3',
-  # 'a/lex.rf' => 'violet',
-  # 'a/aux.rf' => 'thistle',
-  # 'a/lex.rf|a/aux.rf' => 'tan',
-  # 'p/terminal.rf' => 'navy',
-  # 'p/nonterminals.rf' => 'darkgreen',
-  # 'val_frame.rf' => 'cyan',
-  # 'coref_text' => '#4C509F',
-  # 'coref_gram' => '#C05633',
-  # 'compl' => '#629F52',
-  # 'echild' => '#22aa22',
-  # 'eparent' => 'green',
 
-  'descendant' => 'blue',
-  'ancestor' => 'lightblue',
-  'child' => 'black',
-  'parent' => 'lightgray',
+  'a/lex.rf' => 'violet',
+  'a/aux.rf' => 'thistle',
+  'a/lex.rf|a/aux.rf' => 'tan',
+  'p/terminal.rf' => 'navy',
+  'p/nonterminals.rf' => 'darkgreen',
+  'val_frame.rf' => 'cyan',
+  'coref_text' => '#4C509F',
+  'coref_text.rf' => '#4C509F',
+  'coref_gram' => '#C05633',
+  'coref_gram.rf' => '#C05633',
+  'compl' => '#629F52',
+  'compl.rf' => '#629F52',
+  'eparent' => 'green',
+  'echild' => '#66b032', # color[0]
 );
-my %arrow = (
-  'same-tree-as' => 'first',
-  'depth-first-precedes' => 'first',
-  'depth-first-follows' => 'first',
-  'order-precedes' => 'first',
-  'order-follows' => 'first',
-  'descendant' => 'first',
-  'ancestor' => 'first',
-  'child' => 'first',
-  'parent' => 'first',
-
-  # 'a/lex.rf' => 'first',
-  # 'a/aux.rf' => 'first',
-  # 'a/lex.rf|a/aux.rf' => 'first',
-  # 'p/terminal.rf' => 'first',
-  # 'p/nonterminals.rf' => 'first',
-  # 'val_frame.rf' => 'first',
-  # 'coref_text' => 'first',
-  # 'coref_gram' => 'first',
-  # 'compl' => 'first',
-  # 'echild' => 'first',
-  # 'eparent' => 'first',
-);
-
-my $free_arrow_color = 0;
+my $free_arrow_color = 1; # color[0] taken by echild
 my %assigned_colors;
 sub arrow_color {
   my $rel = shift;
@@ -1840,7 +1821,7 @@ sub EditQuery {
 			      @{[GetRelativeQueryNodeType($node_type,
 							  $SEARCH,
 							  CreateRelation($_))]}>0
-							} @{GetRelationTypes($this)}
+							} @{GetRelationTypes($this,$SEARCH)}
 						       ];
 			} else {
 			  $relations = GetRelationTypes($this,$SEARCH);
@@ -1996,7 +1977,9 @@ sub EditQuery {
   while ( defined ($string = EditBoxQuery('Edit query node', $string, '',$qopts)) ) {
     my $t0 = new Benchmark;
     eval {
-      local $Tree_Query::specific_relations = join('|',@{$SEARCH->get_specific_relations()});
+      local $Tree_Query::specific_relations = join('|',@{$SEARCH->get_specific_relations()})
+	if $SEARCH;
+      print $Tree_Query::specific_relations,"\n";
       if (!$node->parent) {
 	$result=$parser->parse_query($string);
       } elsif ($node->{'#name'} eq 'node') {

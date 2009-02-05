@@ -33,7 +33,12 @@ use Scalar::Util qw(weaken);
 use HTTP::Request::Common;
 use File::Temp;
 use Encode;
+use PMLSchema;
 use URI;
+
+use vars qw($VERSION $MIN_SERVER_VERSION);
+$VERSION = "0.2";
+$MIN_SERVER_VERSION = "0.2";
 
 #use LWP::UserAgent;
 
@@ -591,6 +596,7 @@ sub init {
   }
   $self->{config}{data} = $cfg;
   $self->{spinbox_timeout}=int($self->{config}{pml}->get_root->get_member('timeout')) || $DEFAULTS{timeout};
+  $self->check_server_version;
 }
 
 sub show_result {
@@ -692,6 +698,25 @@ sub update_label {
   my $tb=$self->toolbar;
   $tb->update if $tb;
   return;
+}
+
+sub check_server_version {
+  my ($self,$server_version)=@_;
+  my $res = $self->request('version',
+			   [ client_version=>$VERSION,
+			     format=>'text',
+			    ]);
+  unless ($res->is_success) {
+    die "Failed to connect to server (the server is incompatible or down)!\n".$res->status_line."\n";;
+  }
+  my $v = $res->content;
+  $v=~s/\r?\n$//;
+  if ($v!~/^(IN)?COMPATIBLE\s+(\S+)/ or $1) {
+    die "Server requires a newer version of this client; please upgrade the 'pmltq' TrEd extension!!\n";
+  } elsif (PMLSchema::cmp_revisions($MIN_SERVER_VERSION,$2)>0) {
+    die "Server is too old for this client; please ask your PML-TQ server administrator to upgrade!\n";
+  }
+  return 1;
 }
 
 sub idx_to_pos {
