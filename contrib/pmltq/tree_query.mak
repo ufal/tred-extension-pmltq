@@ -1268,7 +1268,7 @@ sub node_style_hook {
 	  -fill   => $showHidden ? 'gray' : arrow_color($name),
 	  (-dash   => $negate ? '-' : ''),
 	  -raise => 8+16*(++$i),
-	  -tag => 'relation',
+	  -tag => 'relation:'.$ref,
 	}
       } SeqV($ref->attr('relation'))
      ], {
@@ -1297,7 +1297,14 @@ sub get_value_line_hook {
 sub line_click_hook {
   my ($node,$tag,$button, $double,$modif, $ev)=@_;
   if ($node and $double and $button eq '1' and !$modif) {
-    if ($tag eq 'relation') {
+    if ($tag =~ /^relation:(.*)$/) {
+      for my $n (grep { "$_" eq $1 }  $node, $node->children) {
+	local $main::sortAttrs=0;
+	EditAttribute($n,'relation');
+	Redraw();
+	last;
+      }
+    } elsif ($tag eq 'relation') {
       local $main::sortAttrs=0;
       EditAttribute($node,'relation');
       Redraw();
