@@ -1,0 +1,67 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head><title>Generated documentation for pmltq/tree_query_btred.mak</title>
+	<meta name="description" content="Pod documentation for "></meta>
+	<meta name="inputfile" content="/export/home/pajas/projects/tred-extensions/pmltq/documentation/.pod/pmltq/tree_query_btred.mak.pod"></meta>
+	<meta name="outputfile" content="&lt;standard output&gt;"></meta>
+	<meta name="created" content="Thu Jan 29 10:06:26 2009"></meta>
+	<meta name="generator" content="Pod::Xhtml 1.59"></meta>
+<link rel="stylesheet" href="../css/blue.css"></link></head>
+<body><h1>Generated documentation for pmltq/tree_query_btred.mak</h1>
+<div class="pod">
+<p>1. find in the query graph an oriented sceleton tree, possibly using
+Kruskal and some weighting rules favoring easy to follow types of
+edges (relations) with minimum number of potential target nodes
+(e.g. parent, ancestor a/lex.rf are better than child, descendant or
+a/aux.rf, and far better then their negated counterparts).</p>
+<p>2. Order sibling nodes of this tree by similar algorithm so that all
+relations between these nodes go from right bottom to left top (using
+reversing where possible) and the result is near optimal using similar
+weighting as above. This may be done only for relations not occuring
+in condition formulas.</p>
+<p>3. For each relation between nodes that occurs in a condition formula,
+assume that the relation is or is not satisfied so that the truth
+value of the condition is not decreased (whether to take the formula
+negatively or positively is probably easy to compute since we may
+eliminate all negations of non-atomic subformulas and then aim for
+TRUE value of the respective literal; that is, we only count the
+number of negations on the path from the root of the expression to the
+predicate representing the relational constraint and assume TRUE for
+even numbers and FALSE for odd numbers).</p>
+<p>The actual truth values of these relations will be verified only after
+all query nodes have been matched (or maybe for each node as soon as
+all nodes it refers to have been matched).</p>
+<p>4. The query context consists of:</p>
+<p>- the node in the query-tree being matched (current query node)</p>
+<p>- association of the previously matched query nodes with result node iterators</p>
+<p>- information about unresolved relational constraints on already
+  matched nodes</p>
+<p>5. the search starts by creating an initial query context and a simple
+iterator for the root query node matches</p>
+<p>6. in each step one of the following cases occurs:</p>
+<p>- the iterator for the current query node is empty
+  -&gt; backtrack: return to the state of the context of the previous query node
+     and iterate the associated iterator
+  -&gt; fail if there is no previous query node</p>
+<p>- the iterator returns a node:</p>
+<pre>  - check relational constraints depending on this node.
+    If any of them invalidates the condition on an already matched node,
+    itereate and repeat 6
+
+  - if there is a following query node, make it the current query node
+    and repeat 6
+
+  - otherwise: we have a complete match. Return the match, back-track
+    the context to the root-node and iterate the root-node iterator.
+    Then repeat 6.
+
+</pre>
+<p>Note: #occurrences are to be implemented as sub-queries that are
+processed along with other conditions within the simple iterators.
+The relation predicates from these sub-queries to the out-side trees
+are treated as predicate relations in complex relations and are only
+resolved as soon as all required query nodes are matched.</p>
+
+
+</div></body>
+</html>
