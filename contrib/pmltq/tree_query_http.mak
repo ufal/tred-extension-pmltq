@@ -9,18 +9,12 @@
 {
 package TrEd::PMLTQ::UserAgent;
   use base qw(LWP::UserAgent);
-  sub get_basic_credentials {
-    my $self = shift;
-    my ($realm, $uri, $isproxy)=@_;
-    my $cfg=$self->{PMLTQ_CFG};
-    if (ref $cfg) {
-      return ($cfg->{username},$cfg->{password});
-    }
-    return $self->LWP::UserAgent::get_basic_credentials(@_);
+  sub credentials {
+    shift; # self
+    return $IOBackend::lwp_user_agent->credentials(@_);
   }
-  sub set_cfg {
-    my ($self,$cfg)=@_;
-    $self->{PMLTQ_CFG}=$cfg;
+  sub get_basic_credentials {
+    return;
   }
 }
 
@@ -39,6 +33,7 @@ use URI;
 use vars qw($VERSION $MIN_SERVER_VERSION);
 $VERSION = "0.2";
 $MIN_SERVER_VERSION = "0.2";
+my $ua = $IOBackend::lwp_user_agent; #TrEd::PMLTQ::UserAgent->new();
 
 #use LWP::UserAgent;
 
@@ -51,7 +46,7 @@ our %DEFAULTS = (
 );
 
 $Tree_Query::HTTPSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
-my $ua = $IOBackend::lwp_user_agent;
+# my $ua = $IOBackend::lwp_user_agent;
 #$ua = IOBackend->new;
 #$ua->agent("TrEd/1.0 ");
 
@@ -550,6 +545,14 @@ sub request {
   my $res = eval {
     $ua->request(POST(qq{${url}${type}}, $data),$out_file ? $out_file : ());
   };
+  if ($res and $res->is_error and $res->code == 401) {
+    # unauthorized
+    # Got authorization error 401, maybe the nonce is stale, let's try again...
+    $res = eval {
+      $ua->request(POST(qq{${url}${type}}, $data),$out_file ? $out_file : ());
+    };
+  }
+
   confess($@) if $@;
   return $res;
 }

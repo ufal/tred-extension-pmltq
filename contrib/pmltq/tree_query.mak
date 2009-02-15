@@ -1921,15 +1921,34 @@ sub EditQuery {
 		 ['in { ... }',undef,{-command => [\&_editor_offer_values,$ed,'in']}],
 		 ['~ (regexp)' => '~'],
 		 qw|< >|,
-		 [Function => [map { $_.'()' }
+		 [Function => [#map { $_.'()' }
 				 sort
-				   qw( descendants
-				       lbrothers
-				       rbrothers sons depth_first_order
-				       depth lower upper length substr tr replace ciel floor
-				       round trunc percnt name file tree_no address substitute match
+				   qw(
+				       descendants(#NODE?#)
+				       lbrothers(#NODE?#)
+				       rbrothers(#NODE?#)
+				       sons(#NODE?#)
+				       depth_first_order(#NODE?#)
+				       depth(#NODE?#)
+				       lower(#STR#)
+				       upper(#STR#)
+				       length(#STR#)
+				       substr(#STR#,OFFSET,LEN?),
+				       tr(#STR,CHARS_TO_REPLACE#,REPLACEMENT_CHARS)
+				       replace(#STR#,SUBSTR,REPLACEMENT)
+				       ciel(#NUM#)
+				       floor(#NUM#)
+				       round(#NUM#,PLACES?)
+				       trunc(#NUM#,PLACES?)
+				       percnt(#NUM#)
+				       name(#NODE?#)
+				       file(#NODE?#)
+				       tree_no(#NODE?#)
+				       address(#NODE?#)
+				       substitute(#STR,REGEXP#,REPLACEMENT,FLAGS?)
+				       match(#STR,REGEXP#,FLAGS?)
 				    )
-			       ]],
+				  ]],
 		 "\n",
 		 qw|, ! and or ()|,
 		 [q|"..."| => q|""|],
@@ -1940,7 +1959,7 @@ sub EditQuery {
 		 ($node->parent
 		    ? ()
 		    : (qw| >> |,
-                       [q|for/give/sort by| => qq|for ...\n    give distinct ...\n    sort by ...|],
+                       [q|Grouping: for/give/sort by| => qq|for ...\n    give distinct ...\n    sort by ...|],
 		       ['Analytic function' => [map { $_.'()' }
 						  sort
 						    qw( min max sum avg count ratio concat )
@@ -1965,7 +1984,17 @@ sub EditQuery {
 		   $menubutton->configure(-menu => $menu);
 		   for (@$value) {
 		     $menubutton->command(-label => $_,
-					  -command => [$ed,'Insert',' '.$_.' ']
+					  -command =>
+					    [ sub { 
+						if ($_[1]=~s/#(.*)#(.*)/$1$2/) {
+						  $_[0]->Insert($_[1]);
+						  $_[0]->SetCursor('insert -'.length($2).' chars');
+						  $_[0]->tagAdd('sel','insert-'.length($1).' chars','insert');
+						} else {
+						  $_[0]->Insert($_[1]);
+						}
+					      },
+					      $ed,' '.$_.' ' ]
 					 );
 		   }
 		 } else {
