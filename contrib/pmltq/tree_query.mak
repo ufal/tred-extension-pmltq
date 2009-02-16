@@ -1799,10 +1799,8 @@ sub EditQuery {
   my $no_childnodes = ($node->{'#name'} =~ /^(node|subquery)$/ and $opts->{no_childnodes}) ? 1 : 0;
   my $string = $opts->{string} || as_text($node,{no_childnodes=>$no_childnodes});
   my $result;
-  my $parser;
   {
     my $t0 = new Benchmark;
-    $parser = query_parser();
     my $t1 = new Benchmark;
     my $time = timestr(timediff($t1,$t0));
     print "creating parser took: $time\n";
@@ -2013,15 +2011,15 @@ sub EditQuery {
   while ( defined ($string = EditBoxQuery('Edit query node', $string, '',$qopts)) ) {
     my $t0 = new Benchmark;
     eval {
-      local $Tree_Query::specific_relations = join('|',@{$SEARCH->get_specific_relations()})
-	if $SEARCH;
-      print $Tree_Query::specific_relations,"\n";
+      my $opts = {
+	specific_relations => ($SEARCH && $SEARCH->get_specific_relations()),
+      };
       if (!$node->parent) {
-	$result=$parser->parse_query($string);
+	$result=parse_query($string,$opts);
       } elsif ($node->{'#name'} eq 'node') {
-	$result=$parser->parse_node($string);
+	$result=parse_node($string,$opts);
       } else {
-	$result=$parser->parse_conditions($string); # returns ARRAY
+	$result=parse_conditions($string,$opts); # returns ARRAY
       }
     };
     my $t1 = new Benchmark;

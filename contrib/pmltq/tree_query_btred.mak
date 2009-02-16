@@ -34,7 +34,10 @@ sub init_search {
     my $query=$opts->{query};
     die "Empty query\n" unless length $query;
     # FIXME: specific_relations
-    $query_tree=Tree_Query->parse_query($query);
+    my $type_mapper = $opts->{type_mapper};
+    $query_tree=Tree_Query::parse_query($query,{
+      specific_relations =>  $type_mapper && $type_mapper->get_specific_relations(),
+    });
     DetermineNodeType($_) for $query_tree->descendants;
     print STDERR "Parsed $query\n";
   } else {
@@ -614,8 +617,9 @@ sub claim_search_win {
     if (ref($query_tree)) {
       $clone_before_plan = 1;
     } else {
-      local $Tree_Query::specific_relations = join('|',@{$self->{type_mapper}->get_specific_relations()});
-      $query_tree = Tree_Query->parse_query($query_tree);
+      $query_tree = Tree_Query::parse_query($query_tree,{
+	specific_relations =>  $self->{type_mapper}->get_specific_relations(),
+      });
       TredMacro::DetermineNodeType($_) for $query_tree->descendants;
     }
 
@@ -1283,7 +1287,7 @@ sub claim_search_win {
 
   sub serialize_expression {
     my ($self,$opts)=@_;
-    my $pt = Tree_Query::query_parser()->parse_expression($opts->{expression}); # $pt stands for parse tree
+    my $pt = Tree_Query::parse_expression($opts->{expression}); # $pt stands for parse tree
     die "Invalid expression '$opts->{expression}' on node '$opts->{id}'" unless defined $pt;
     return $self->serialize_expression_pt($pt,$opts);
   }
