@@ -1780,7 +1780,7 @@ sub _editor_offer_values {
       my $decl = $SEARCH->get_decl_for($type);
       my @values;
       if ($is_name) {
-	@values = map qq{'$_'}, @{_find_element_names_for_decl($decl)};
+	@values = @{_find_element_names_for_decl($decl)};
       } elsif ($decl and ($decl = $decl->find($attr))) {
 	my $decl_is = $decl->get_decl_type;
 	while ($decl_is == PML_ALT_DECL or
@@ -1790,7 +1790,7 @@ sub _editor_offer_values {
 	}
 	if ($decl_is == PML_CHOICE_DECL or
 	      $decl_is == PML_CONSTANT_DECL) {
-	  @values = map { $_=~/\D/ ? qq{"$_"} : $_ } $decl->get_values;
+	  @values = $decl->get_values;
 	}
       }
       if (@values) {
@@ -1812,6 +1812,7 @@ sub _editor_offer_values {
     }
   }
   $ed->focus;
+  @sel = map { $_=~/\D/ ? qq{"$_"} : $_ } @sel;
   if ($operator eq 'in') {
     $ed->Insert(q( in { ).join(', ',@sel).q( } ));
   } else {
