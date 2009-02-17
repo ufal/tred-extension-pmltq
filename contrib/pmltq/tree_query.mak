@@ -786,11 +786,16 @@ END
     SetCurrentFileList($fl->name);
     Open($filename);
   }
-  GotoTree(scalar(GetTrees()));
-  SelectSearch() || return;
-  DetermineNodeType(NewTreeAfter()) if !$root or $root->children;
+  my @trees = GetTrees();
+  if (@trees) {
+    GotoTree(scalar(@trees));
+  }
+  if (!@trees or $root && $root->children) {
+    DetermineNodeType(NewTreeAfter());
+  }
   $root->{id}=$id if $root;
   ChangingFile(0);
+  SelectSearch() || return;
 }
 
 
@@ -1747,17 +1752,35 @@ sub _find_type_in_query_string {
   return ($type,$var);
 }
 
+sub _find_element_names_for_decl {
+  my ($decl)=@_;
+  my %names;
+  $decl->get_schema->for_each_decl(
+    sub {
+      my ($d)=@_;
+      if ($d->get_decl_type == PML_ELEMENT_DECL
+	    and $d->get_content_decl == $decl) {
+	$names{ $d->get_name } = 1;
+      }
+    }
+   );
+  return [sort keys %names];
+}
+
 sub _editor_offer_values {
   my ($ed,$operator) = @_;
   my @sel;
   if ($SEARCH) {
     my $context = $ed->get('0.0','insert');
-    if ($context=~s{(${variable_re}\.)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)\s*$}{$1}) {
-      my ($var,$attr) = ($1,$2);
+    if ($context=~s{(?:(${variable_re}\.)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)|(name)\(\s*(${variable_re})?\s*\))\s*$}{$1}) {
+      my ($var,$attr,$is_name,$name_var) = ($1,$2,$3,$4);
       my ($type) = _find_type_in_query_string($context,
-						   $ed->get('insert','end'));
+					      $ed->get('insert','end'));
       my $decl = $SEARCH->get_decl_for($type);
-      if ($decl and ($decl = $decl->find($attr))) {
+      my @values;
+      if ($is_name) {
+	@values = map qq{'$_'}, @{_find_element_names_for_decl($decl)};
+      } elsif ($decl and ($decl = $decl->find($attr))) {
 	my $decl_is = $decl->get_decl_type;
 	while ($decl_is == PML_ALT_DECL or
 		 $decl_is == PML_LIST_DECL) {
@@ -1766,19 +1789,23 @@ sub _editor_offer_values {
 	}
 	if ($decl_is == PML_CHOICE_DECL or
 	      $decl_is == PML_CONSTANT_DECL) {
-	  unless (ListQuery(
-	    'Select value',
-	    $operator eq 'in' ? 'multiple' : 'browse',
-	    [map { $_=~/\D/ ? qq{"$_"} : $_ } $decl->get_values],
-	    \@sel,
-	    {
-	      top => $ed->toplevel,
-	    }
-	   )) {
-	    $ed->focus;
-	    $ed->Insert(' '.$operator.' ');
-	    return;
+	  @values = map { $_=~/\D/ ? qq{"$_"} : $_ } $decl->get_values;
+	}
+      }
+      if (@values) {
+	$sel[0] = $values[0] unless $operator eq 'in';
+	unless (ListQuery(
+	  'Select value',
+	  $operator eq 'in' ? 'multiple' : 'browse',
+	  \@values,
+	  \@sel,
+	  {
+	    top => $ed->toplevel,
 	  }
+	 )) {
+	  $ed->focus;
+	  $ed->Insert(' '.$operator.' ');
+	  return;
 	}
       }
     }
@@ -1789,6 +1816,31 @@ sub _editor_offer_values {
   } else {
     $ed->Insert(' '.$operator.' '.(@sel ? $sel[0] : ''))
   }
+}
+
+sub _assign_shortcuts {
+  my ($labels)=@_;
+  my %used;
+  my %map;
+  my @unassigned = @$labels;
+  my $i=0;
+  while (@unassigned) {
+    my @next;
+    for (@unassigned) {
+      if (length($_) > $i) {
+	my $ul = lc substr($_, $i, 1);
+	if ($ul !~ /[[:alnum:]]/ or exists $used{$ul}) {
+	  push @next,$_;
+	} else {
+	  $used{$ul}=1;
+	  $map{$_}=$i;
+	}
+      }
+    }
+    @unassigned = @next;
+    $i++;
+  }
+  return \%map;
 }
 
 sub EditQuery {
@@ -1895,6 +1947,9 @@ sub EditQuery {
 			   my $decl = $SEARCH->get_decl_for($type);
 			   if ($decl) {
 			     my @res = $decl->get_paths_to_atoms({ no_childnodes => 1 });
+			     if (@{ _find_element_names_for_decl($decl) }) {
+			       unshift @res, 'name()';
+			     }
 			     if (@res) {
 			       my @sel=$res[0];
 			       if (ListQuery('Select attribute'.
@@ -1915,7 +1970,7 @@ sub EditQuery {
 		       },$ed]
 		     }
 		 ],
-		 ['=',undef,{-command => [\&_editor_offer_values,$ed,'=']}],
+		 ['= (equals)',undef,{-command => [\&_editor_offer_values,$ed,'=']}],
 		 ['in { ... }',undef,{-command => [\&_editor_offer_values,$ed,'in']}],
 		 ['~ (regexp)' => '~'],
 		 qw|< >|,
@@ -1980,8 +2035,10 @@ sub EditQuery {
 		    )->pack(-side=>'left');
 		   my $menu = $menubutton->menu(-tearoff => 0,-font=>'C_small');
 		   $menubutton->configure(-menu => $menu);
+		   my $ul = _assign_shortcuts($value);
 		   for (@$value) {
 		     $menubutton->command(-label => $_,
+					  (defined $ul->{$_} ? (-underline => $ul->{$_}) : ()),
 					  -command =>
 					    [ sub { 
 						if ($_[1]=~s/#(.*)#(.*)/$1$2/) {
@@ -2126,10 +2183,10 @@ sub DeleteNode {
   my $node=$this;
   return unless $node;
   unless ($node->parent) {
-    return if $node->firstson
+    return if (!$node->firstson
       and (QuestionQuery("Really delete tree?",
 			 "Do you want to delete the whole query tree?",
-			 "Delete","Cancel") ne 'Delete');
+			 "Delete","Cancel") ne 'Delete'));
     DestroyTree();
   }
   my $p = $node->parent && $node->parent->parent;
