@@ -32,7 +32,7 @@ use URI;
 
 use vars qw($VERSION $MIN_SERVER_VERSION);
 $VERSION = "0.2";
-$MIN_SERVER_VERSION = "0.2";
+$MIN_SERVER_VERSION = "0.3";
 my $ua = $IOBackend::lwp_user_agent; #TrEd::PMLTQ::UserAgent->new();
 
 #use LWP::UserAgent;

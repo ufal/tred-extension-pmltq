@@ -233,6 +233,7 @@
   <type name="num.operator.type">
     <choice>
       <value>=</value>
+      <value>!=</value>
       <value>&lt;</value>
       <value>&gt;</value>
       <value>&lt;=</value>
@@ -244,6 +245,9 @@
       <value>in</value>
       <value>~</value>
       <value>~*</value>
+      <value>!in</value>
+      <value>!~</value>
+      <value>!~*</value>
     </choice>
   </derive>
 

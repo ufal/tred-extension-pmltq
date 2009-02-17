@@ -1770,9 +1770,10 @@ sub _find_element_names_for_decl {
 sub _editor_offer_values {
   my ($ed,$operator) = @_;
   my @sel;
+  my $context= $ed->get('0.0','insert');
+
   if ($SEARCH) {
-    my $context = $ed->get('0.0','insert');
-    if ($context=~s{(?:(${variable_re}\.)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)|(name)\(\s*(${variable_re})?\s*\))\s*$}{$1}) {
+    if ($context=~s{(?:(${variable_re}\.)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)|(name)\(\s*(${variable_re})?\s*\))\s*!?$}{$1}) {
       my ($var,$attr,$is_name,$name_var) = ($1,$2,$3,$4);
       my ($type) = _find_type_in_query_string($context,
 					      $ed->get('insert','end'));
@@ -1804,7 +1805,7 @@ sub _editor_offer_values {
 	  }
 	 )) {
 	  $ed->focus;
-	  $ed->Insert(' '.$operator.' ');
+	  $ed->Insert($operator.' ');
 	  return;
 	}
       }
@@ -1814,7 +1815,7 @@ sub _editor_offer_values {
   if ($operator eq 'in') {
     $ed->Insert(q( in { ).join(', ',@sel).q( } ));
   } else {
-    $ed->Insert(' '.$operator.' '.(@sel ? $sel[0] : ''))
+    $ed->Insert($operator.' '.(@sel ? $sel[0] : ''))
   }
 }
 
@@ -2003,7 +2004,8 @@ sub EditQuery {
 				    )
 				  ]],
 		 "\n",
-		 qw|, ! and or ()|,
+		 qw|, and or ()|,
+		 ['!','!'],
 		 [q|"..."| => q|""|],
 		 [q|'...'|=> q|''|],
 		 qw|+ - * / ^ $|,
