@@ -215,7 +215,11 @@ sub search_first {
   }
   $self->update_label('');
   unless ($res->is_success) {
-    ErrorMessage($res->status_line."\n".$res->content."\n");
+    if ($res->code() eq '500') {
+      ErrorMessage("Error reported by PML-TQ server:\n\n".$res->content."\n");
+    } else {
+      ErrorMessage($res->status_line."\n".$res->content."\n");
+    }
     return;
   }
   $t0 = new Benchmark;
@@ -552,7 +556,7 @@ sub request {
       $ua->request(POST(qq{${url}${type}}, $data),$out_file ? $out_file : ());
     };
   }
-
+  
   confess($@) if $@;
   return $res;
 }
