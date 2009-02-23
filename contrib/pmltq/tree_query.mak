@@ -836,7 +836,7 @@ sub attr_choices_hook {
     if ($attr_path eq 'a') {
       my $type = $SEARCH && $SEARCH->get_type_decl_for_query_node($node);
       if ($type) {
-	my @res = sort $type->get_paths_to_atoms({ no_childnodes => 1 });
+	my @res = sort map { my $t = $_; $t=~s{#content}{[]}g; $t } $type->get_paths_to_atoms({ no_childnodes => 1 });
 	return @res ? \@res : ();
       }
     } elsif ($attr_path eq 'b') {
@@ -1948,7 +1948,7 @@ sub EditQuery {
 			 if (defined $type and length $type) {
 			   my $decl = $SEARCH->get_decl_for($type);
 			   if ($decl) {
-			     my @res = $decl->get_paths_to_atoms({ no_childnodes => 1 });
+			     my @res = map { my $t = $_; $t=~s{#content}{[]}g; $t } $decl->get_paths_to_atoms({ no_childnodes => 1 });
 			     if (@{ _find_element_names_for_decl($decl) }) {
 			       unshift @res, 'name()';
 			     }

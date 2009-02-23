@@ -220,7 +220,7 @@ sub get_node_types {
 }
 
 sub get_specific_relations {
-  return [qw(echild eparent a/lex.rf\ a/aux.rf a/lex.rf a/aux.rf coref_text.rf coref_gram.rf compl.rf val_frame.rf)]
+  return [qw(echild eparent a/lex.rf|a/aux.rf a/lex.rf a/aux.rf coref_text.rf coref_gram.rf compl.rf val_frame.rf)]
 }
 
 my %user_defined_relations = (
@@ -822,6 +822,7 @@ sub claim_search_win {
 	$iterator = AAuxRFIterator->new($conditions);
       } elsif ($rel->value->{label} eq 'a/lex.rf') {
 	$iterator = ALexRFIterator->new($conditions);
+	#$iterator = PMLRFIterator->new($conditions,'a/lex.rf');
       } elsif ($rel->value->{label} eq 'a/lex.rf|a/aux.rf') {
 	$iterator = ALexOrAuxRFIterator->new($conditions);
       } elsif ($rel->value->{label} eq 'coref_text.rf') {
@@ -914,32 +915,36 @@ sub claim_search_win {
     my $match_pos = $self->{pos2match_pos}[$pos];
     if ($name eq 'test') {
       my %depends_on;
+      my $foreach = [];
       my $left = $self->serialize_expression({%$opts,
+					      foreach => $foreach,
 					      depends_on => \%depends_on,
 					      expression=>$node->{a}
 					     }); # FIXME: quoting
       my $right = $self->serialize_expression({%$opts,
+					       foreach => $foreach,
 					       depends_on => \%depends_on,
 					       expression=>$node->{b}
 					      }); # FIXME: quoting
       my $operator = $node->{operator};
+      my $negate = $operator=~s/^!// ? 1 : 0;
       if ($operator eq '=') {
 	if ($right=~/^(?:\d*\.)?\d+$/ or $left=~/^(?:\d*\.)?\d+$/) {
-	  $operator = '==';
+	  $operator = '==' unless $negate;
 	} else {
-	  $operator = 'eq';
+	  $operator = $negate ? 'ne' : 'eq';
 	}
       } elsif ($operator eq '~') {
-	$operator = '=~';
+	$operator = $negate ? '!~' : '=~';
       }
       my $condition;
       if ($operator eq '~*') {
-	$condition='do{ my $regexp='.$right.'; '.$left.'=~ /$regexp/i}';
+	$condition='do{ my $regexp='.$right.'; '.$left.($negate ? '!~' : '=~').' /$regexp/i}';
       } elsif ($operator eq 'in') {
 	# TODO: 'first' is actually pretty slow, we should use a disjunction
 	# but splitting may be somewhat non-trivial in such a case
 	# - postponing till we know exactly how a tree-query term may look like
-	$condition='do{ my $node='.$left.'; grep $_ eq '.$left.', '.$right.'}';
+	$condition='do{ my $node='.$left.'; '.($negate ? '!' : '').'grep $_ eq '.$left.', '.$right.'}';
 	# #$condition=$left.' =~ m{^(?:'.join('|',eval $right).')$}';
 	# 	$right=~s/^\s*\(//;
 	# 	$right=~s/\)\s*$//;
@@ -948,6 +953,43 @@ sub claim_search_win {
       } else {
 	$condition='('.$left.' '.$operator.' '.$right.')';
       }
+
+      if ($ENV{TRED_DEVEL}) {
+	print STDERR "----\n";
+	print STDERR "A: $node->{a}\n";
+	print STDERR "B: $node->{b}\n";
+	print STDERR "F: ",join(", ",map "$_->[0]:$_->[1]", @$foreach), "\n";
+	my @wrap_l = ([0,q`do {`],[0,q` my $reslt;`]);
+	my @wrap_r = ([0,q` $reslt`],[0,q`}`]);
+	my $negate = 0;
+	for my $i (0..$#$foreach) {
+	  if ($foreach->[$i][0]==2) {
+	    $negate=!$negate;
+	    unshift @wrap_r, [$i,q`$reslt = !$reslt;`];
+	  } elsif ($foreach->[$i][0]==1) {
+	    push @wrap_l, [$i,qq`foreach my \$var$i ($foreach->[$i][1]) {`],
+	                  [$i,qq` if (defined \$var$i) {`];
+	    unshift @wrap_r, [$i,qq`  last if \$reslt;`],
+	                  [$i,qq` }`],
+	                  [$i,qq`}`];
+	  } else {
+	    push @wrap_l, [$i,qq`my \$var$i = $foreach->[$i][1];`],
+	                  [$i,qq`if (defined \$var$i) {`];
+	    unshift @wrap_r, [$i,qq`}`];
+	  }
+	}
+	$condition = join('',
+			  map { ('  ' x ($_->[0]+10)).$_->[1]."\n" }
+			    (
+			      @wrap_l,
+			      [$#$foreach,qq`  \$reslt = ($condition) ? `.($negate ? '0:1;' : '1:0;')],
+			      @wrap_r
+			    )
+			   );
+	print STDERR "$condition\n";
+	print STDERR "----\n";
+      }
+
       my $target_match_pos = TredMacro::max($match_pos,keys %depends_on);
       my $target_pos = TredMacro::Index($self->{pos2match_pos},$target_match_pos);
       if (defined $target_pos) {
@@ -1102,7 +1144,10 @@ sub claim_search_win {
     my $this_node_id = $opts->{id};
     if (ref($pt)) {
       my $type = shift @$pt;
-      if ($type eq 'ATTR' or $type eq 'REF_ATTR') {
+      if ($type eq 'EVERY') {
+	push @{$opts->{foreach}}, [2];
+	return $self->serialize_expression_pt($pt->[0],$opts);
+      } elsif ($type eq 'ATTR' or $type eq 'REF_ATTR') {
 	my ($node);
 	if ($type eq 'REF_ATTR') {
 	  my $target = lc($pt->[0]);
@@ -1119,16 +1164,17 @@ sub claim_search_win {
 	#my $match_pos = $self->{pos2match_pos}[$pos];
 
 	my $attr=join('/',@$pt);
+	$attr=~s{\bcontent\(\)}{#content}g; # translate from PML-TQ notation to PML notation
 	my $type_decl = $self->{type_mapper}->get_decl_for($opts->{type});
 	if (!$type_decl) {
 	  warn "Unknown type: $opts->{type}\n";
 	} else {
 	  my $decl = $type_decl;
-
 	  my $foreach = $opts->{foreach} ||= [];
 	  my $pexp=$node;
 	  for my $step (@$pt) {
-	    print STDERR $decl->get_decl_type_str,"\n";
+	    $step = '#content' if $step eq '[]';
+	    print STDERR "step: $step, pexp: $pexp, type: ", $decl->get_decl_type_str,", path: ",$decl->get_decl_path,"\n";
 	    my $decl_is = $decl->get_decl_type;
 	    if ($decl_is == PML_STRUCTURE_DECL or $decl_is == PML_CONTAINER_DECL) {
 	      my $m = $decl->get_member_by_name($step);
@@ -1136,8 +1182,10 @@ sub claim_search_win {
 		$decl=$m->get_content_decl;
 	      } else {
 		$m = $decl->get_member_by_name($step.'.rf');
-		if ($m and (($m->get_role||'') eq '#KNIT' or ($m->get_content_decl->get_role||'') eq '#KNIT')) {
+		if ($m and ($m->get_role||'') eq '#KNIT') {
 		  $decl=$m->get_knit_content_decl;
+		} elsif ($m and ($m->get_content_decl->get_role||'') eq '#KNIT') {
+		  $decl=$m->get_content_decl;
 		} else {
 		  die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find member '$step'\n" unless defined($m);
 		}
@@ -1145,40 +1193,37 @@ sub claim_search_win {
 	      #
 	      # value
 	      #
-	      push @$foreach, '('.$pexp.'->{qq('.quotemeta($step).')})||()';
-	      # $pexp.='->{qq('.quotemeta($step).')}';
+	      push @$foreach, [0,$pexp.'->{qq('.quotemeta($step).')}'];
 	      $pexp = '$var'.$#$foreach;
 	    } elsif ($decl_is == PML_SEQUENCE_DECL) {
 	      my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find element '$step'\n";
 	      $decl = $e->get_content_decl;
-	      push @$foreach, $pexp.'->values(qq('.quotemeta($step).'))';
+	      push @$foreach, [1,$pexp.'->values(qq('.quotemeta($step).'))'];
 	      $pexp = '$var'.$#$foreach;
 	    } elsif ($decl_is == PML_LIST_DECL) {
-	      $decl = $decl->get_content_decl;
-	      push @$foreach, '@{'.$pexp.'}';
-	      $pexp = '$var'.$#$foreach;
+	      $decl = $decl->get_knit_content_decl;
+	      if ($step =~ /^\[(\d+)\]$/) {
+		push @$foreach, [0,$pexp.'->[$1]'];
+		$pexp = '$var'.$#$foreach;
+	      } else {
+		push @$foreach, [1,'@{'.$pexp.'}'];
+		$pexp = '$var'.$#$foreach;
+		redo;
+	      }
 	    } elsif ($decl_is == PML_ALT_DECL) {
 	      $decl = $decl->get_content_decl;
-	      push @$foreach, 'AltV('.$pexp.')';
+	      push @$foreach, [1,'AltV('.$pexp.')'];
 	      $pexp = '$var'.$#$foreach;
+	      redo;
 	    } else {
-	      die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' for an atomic type!\n";
+	      die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' to an atomic type '".$decl->get_decl_path."'!\n";
 	    }
 	  }
-	  if (1) { #$ENV{TRED_DEVEL}) {
-	    print STDERR "----\n";
-	    print STDERR "ATTR: $attr\n";
-	    print STDERR "PEXP: $pexp\n";
-	    for my $i (0..$#$foreach) {
-	      print STDERR (' ' x $i).q`foreach my $var`.$i.qq` ($foreach->[$i]) {`."\n";
-	    }
-	    for my $i (reverse 0..$#$foreach) {
-	      print STDERR (' ' x $i).q`}` ."\n";
-	    }
-	    print STDERR "----\n";
+	  if ($ENV{TRED_DEVEL}) {
+	    return '$var'.$#$foreach
 	  }
 	  #	$attr = q`do{ my $v=`.(($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]).q`; $v=$v->[0] while ref($v) eq 'Fslib::List' or ref($v) eq 'Fslib::Alt'; $v} `;
-	$attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
+	    $attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
 	}
 	return qq{ $attr };
       } elsif ($type eq 'FUNC') {
@@ -2203,6 +2248,7 @@ sub claim_search_win {
   use constant CONDITIONS=>0;
   use constant NODES=>1;
   use constant FILE=>2;
+  use constant FIRST_FREE=>3; # number of the first constant free for user
   sub start  {
     my ($self,$node,$fsfile)=@_;
     $self->[FILE]=$fsfile;
@@ -2250,6 +2296,39 @@ sub claim_search_win {
       } TredMacro::ListV($node->attr('a/aux.rf'))];
   }
   sub file {
+    return PML_T::AFile($_[0]->[SimpleListIterator::FILE]);
+  }
+}
+#################################################
+{
+  package PMLRFIterator;
+  use base qw(SimpleListIterator);
+  use constant ATTR => SimpleListIterator::FIRST_FREE;
+  use Carp;
+  sub new {
+    my ($class,$conditions,$attr)=@_;
+    croak "usage: $class->new(sub{...},\$attr)" unless (ref($conditions) eq 'CODE' and defined $attr);
+    my $self = SimpleListIterator->new($conditions);
+    $self->[ATTR]=$attr;
+    bless $self, $class; # reblessing
+    return $self;
+  }
+  sub get_node_list  {
+    my ($self,$node)=@_;
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    return [grep defined, map {
+      my $id = $_;
+      $id=~s/^(.*)?#//; my $ref = $1;
+      if ($ref) {
+	my $ref_fs = $fsfile->appData('ref')->{$ref};
+	$ref_fs ? PML::GetNodeByID($id,$ref_fs) : ();
+      } else {
+	PML::GetNodeByID($id,$fsfile);
+      }
+    } PMLInstance::get_all($node,$self->[ATTR])];
+  }
+  sub file {
+    warn(__PACKAGE__."->file() has yet to be implemented correctly!\n");
     return PML_T::AFile($_[0]->[SimpleListIterator::FILE]);
   }
 }
