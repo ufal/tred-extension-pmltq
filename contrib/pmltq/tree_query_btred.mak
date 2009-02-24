@@ -788,7 +788,7 @@ sub claim_search_win {
     my $relation = $rel && $rel->name;
     $relation||='child';
 
-    print STDERR "iterator: $relation\n" if $DEBUG;
+    print STDERR "iterator: $relation\n" if $DEBUG>1;
     my $iterator;
     if ($relation eq 'child') {
       $iterator = ChildnodeIterator->new($conditions);
@@ -798,7 +798,7 @@ sub claim_search_win {
 	map { $rel->value->{$_} }
 	qw(min_length max_length);
       if (defined($min) or defined($max)) {
-	print STDERR "with bounded depth ($min,$max)\n" if $DEBUG;
+	print STDERR "with bounded depth ($min,$max)\n" if $DEBUG>1;
 	$iterator = DescendantIteratorWithBoundedDepth->new($conditions,$min,$max);
       } else {
 	$iterator = DescendantIterator->new($conditions);
@@ -954,41 +954,34 @@ sub claim_search_win {
 	$condition='('.$left.' '.$operator.' '.$right.')';
       }
 
-      if ($ENV{TRED_DEVEL}) {
-	print STDERR "----\n";
-	print STDERR "A: $node->{a}\n";
-	print STDERR "B: $node->{b}\n";
-	print STDERR "F: ",join(", ",map "$_->[0]:$_->[1]", @$foreach), "\n";
-	my @wrap_l = ([0,q`do {`],[0,q` my $reslt;`]);
-	my @wrap_r = ([0,q` $reslt`],[0,q`}`]);
-	my $negate = 0;
-	for my $i (0..$#$foreach) {
-	  if ($foreach->[$i][0]==2) {
-	    $negate=!$negate;
-	    unshift @wrap_r, [$i,q`$reslt = !$reslt;`];
-	  } elsif ($foreach->[$i][0]==1) {
-	    push @wrap_l, [$i,qq`foreach my \$var$i ($foreach->[$i][1]) {`],
-	                  [$i,qq` if (defined \$var$i) {`];
-	    unshift @wrap_r, [$i,qq`  last if \$reslt;`],
-	                  [$i,qq` }`],
-	                  [$i,qq`}`];
-	  } else {
-	    push @wrap_l, [$i,qq`my \$var$i = $foreach->[$i][1];`],
-	                  [$i,qq`if (defined \$var$i) {`];
-	    unshift @wrap_r, [$i,qq`}`];
-	  }
+      my @wrap_l = ([0,q`do {`],[0,q` my $reslt;`]);
+      my @wrap_r = ([0,q` $reslt`],[0,q`}`]);
+      my $negate = 0;
+      for my $i (0..$#$foreach) {
+	if ($foreach->[$i][0]==2) {
+	  $negate=!$negate;
+	  unshift @wrap_r, [$i,q`$reslt = !$reslt;`];
+	} elsif ($foreach->[$i][0]==1) {
+	  push @wrap_l, [$i,qq`foreach my \$var$i ($foreach->[$i][1]) {`],
+	                [$i,qq` if (defined \$var$i) {`] # although we might probably assume that list values are defined
+			  ;
+	  unshift @wrap_r, [$i,qq`  last if \$reslt;`],
+	                   [$i,qq` }`],
+			   [$i,qq`}`];
+	} else {
+	  push @wrap_l, [$i,qq`my \$var$i = $foreach->[$i][1];`],
+	                [$i,qq`if (defined \$var$i) {`];
+	  unshift @wrap_r, [$i,qq`}`];
 	}
-	$condition = join('',
-			  map { ('  ' x ($_->[0]+10)).$_->[1]."\n" }
-			    (
-			      @wrap_l,
-			      [$#$foreach,qq`  \$reslt = ($condition) ? `.($negate ? '0:1;' : '1:0;')],
-			      @wrap_r
-			    )
-			   );
-	print STDERR "$condition\n";
-	print STDERR "----\n";
       }
+      $condition = join('',
+			map { ('  ' x ($_->[0]+10)).$_->[1]."\n" }
+			  (
+			    @wrap_l,
+			    [$#$foreach,qq`  \$reslt = ($condition) ? `.($negate ? '0:1;' : '1:0;')],
+			    @wrap_r
+			   )
+			 );
 
       my $target_match_pos = TredMacro::max($match_pos,keys %depends_on);
       my $target_pos = TredMacro::Index($self->{pos2match_pos},$target_match_pos);
@@ -1159,74 +1152,73 @@ sub claim_search_win {
 	} else {
 	  $node='$node';
 	}
-	# FIXME: use schema to compile correctly
-
-	#my $pos = $opts->{query_pos};
-	#my $match_pos = $self->{pos2match_pos}[$pos];
-
+	# Below we resolve the attribute path according to the PML schema
+	# we use $opts->{foreach} array to store information
+	# about wrapper loops to be generated; elements of the foreach array are of the form:
+	# [type, expression]
+	# where type==2 and expressoin is undef for the primitive FORALL quantificator '*'
+	#       type==1 if expression produces a list (to be wrapped with a foreach + if defined)
+        #       type==0 if expression produces at most one value (to be wrapped with an if defined)
 	my $attr=join('/',@$pt);
 	$attr=~s{\bcontent\(\)}{#content}g; # translate from PML-TQ notation to PML notation
 	my $type_decl = $self->{type_mapper}->get_decl_for($opts->{type});
 	if (!$type_decl) {
-	  warn "Unknown type: $opts->{type}\n";
-	} else {
-	  my $decl = $type_decl;
-	  my $foreach = $opts->{foreach} ||= [];
-	  my $pexp=$node;
-	  for my $step (@$pt) {
-	    $step = '#content' if $step eq '[]';
-	    print STDERR "step: $step, pexp: $pexp, type: ", $decl->get_decl_type_str,", path: ",$decl->get_decl_path,"\n";
-	    my $decl_is = $decl->get_decl_type;
-	    if ($decl_is == PML_STRUCTURE_DECL or $decl_is == PML_CONTAINER_DECL) {
-	      my $m = $decl->get_member_by_name($step);
-	      if (defined $m) {
+	  die "Cannot resolve attribute path $attr on an unknown node type '$opts->{type}'\n";
+	  # where follows a possible fallback:
+	  $attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
+	  return qq{ $attr };
+	}
+	my $decl = $type_decl;
+	my $foreach = $opts->{foreach} ||= [];
+	my $pexp=$node;
+	for my $step (@$pt) {
+	  $step = '#content' if $step eq '[]';
+	  print STDERR "step: $step, pexp: $pexp, type: ", $decl->get_decl_type_str,", path: ",$decl->get_decl_path,"\n";
+	  my $decl_is = $decl->get_decl_type;
+	  if ($decl_is == PML_STRUCTURE_DECL or $decl_is == PML_CONTAINER_DECL) {
+	    my $m = $decl->get_member_by_name($step);
+	    if (defined $m) {
+	      $decl=$m->get_content_decl;
+	    } else {
+	      $m = $decl->get_member_by_name($step.'.rf');
+	      if ($m and ($m->get_role||'') eq '#KNIT') {
+		$decl=$m->get_knit_content_decl;
+	      } elsif ($m and ($m->get_content_decl->get_role||'') eq '#KNIT') {
 		$decl=$m->get_content_decl;
 	      } else {
-		$m = $decl->get_member_by_name($step.'.rf');
-		if ($m and ($m->get_role||'') eq '#KNIT') {
-		  $decl=$m->get_knit_content_decl;
-		} elsif ($m and ($m->get_content_decl->get_role||'') eq '#KNIT') {
-		  $decl=$m->get_content_decl;
-		} else {
-		  die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find member '$step'\n" unless defined($m);
-		}
+		die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find member '$step'\n" unless defined($m);
 	      }
-	      #
-	      # value
-	      #
-	      push @$foreach, [0,$pexp.'->{qq('.quotemeta($step).')}'];
+	    }
+	    #
+	    # value
+	    #
+	    push @$foreach, [0,$pexp.'->{qq('.quotemeta($step).')}'];
+	    $pexp = '$var'.$#$foreach;
+	  } elsif ($decl_is == PML_SEQUENCE_DECL) {
+	    my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find element '$step'\n";
+	    $decl = $e->get_content_decl;
+	    push @$foreach, [1,$pexp.'->values(qq('.quotemeta($step).'))'];
+	    $pexp = '$var'.$#$foreach;
+	  } elsif ($decl_is == PML_LIST_DECL) {
+	    $decl = $decl->get_knit_content_decl;
+	    if ($step =~ /^\[(\d+)\]$/) {
+	      push @$foreach, [0,$pexp.'->[$1]'];
 	      $pexp = '$var'.$#$foreach;
-	    } elsif ($decl_is == PML_SEQUENCE_DECL) {
-	      my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find element '$step'\n";
-	      $decl = $e->get_content_decl;
-	      push @$foreach, [1,$pexp.'->values(qq('.quotemeta($step).'))'];
-	      $pexp = '$var'.$#$foreach;
-	    } elsif ($decl_is == PML_LIST_DECL) {
-	      $decl = $decl->get_knit_content_decl;
-	      if ($step =~ /^\[(\d+)\]$/) {
-		push @$foreach, [0,$pexp.'->[$1]'];
-		$pexp = '$var'.$#$foreach;
-	      } else {
-		push @$foreach, [1,'@{'.$pexp.'}'];
-		$pexp = '$var'.$#$foreach;
-		redo;
-	      }
-	    } elsif ($decl_is == PML_ALT_DECL) {
-	      $decl = $decl->get_content_decl;
-	      push @$foreach, [1,'AltV('.$pexp.')'];
+	    } else {
+	      push @$foreach, [1,'@{'.$pexp.'}'];
 	      $pexp = '$var'.$#$foreach;
 	      redo;
-	    } else {
-	      die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' to an atomic type '".$decl->get_decl_path."'!\n";
 	    }
+	  } elsif ($decl_is == PML_ALT_DECL) {
+	    $decl = $decl->get_content_decl;
+	    push @$foreach, [1,'AltV('.$pexp.')'];
+	    $pexp = '$var'.$#$foreach;
+	    redo;
+	  } else {
+	    die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' to an atomic type '".$decl->get_decl_path."'!\n";
 	  }
-	  if ($ENV{TRED_DEVEL}) {
-	    return '$var'.$#$foreach
-	  }
-	  #	$attr = q`do{ my $v=`.(($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]).q`; $v=$v->[0] while ref($v) eq 'Fslib::List' or ref($v) eq 'Fslib::Alt'; $v} `;
-	    $attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
 	}
-	return qq{ $attr };
+	return '$var'.$#$foreach
       } elsif ($type eq 'FUNC') {
 	my $name = $pt->[0];
 	my $args = $pt->[1];
@@ -1342,7 +1334,7 @@ sub claim_search_win {
     my ($self,$seed,$test_max) = (shift,shift,shift);
     $self->reset();
     my $count=0;
-    print STDERR "<subquery>\n";# if $DEBUG;
+    print STDERR "<subquery>\n" if $DEBUG>1;
     while ($self->find_next_match({boolean => 1, seed=>$seed})) {
       last unless $count<=$test_max;
       $count++;
@@ -1359,8 +1351,8 @@ sub claim_search_win {
 	last;
       }
     }
-    print "occurrences: >=$count\n" if $DEBUG;
-    print STDERR "</subquery>\n" if $DEBUG;
+    print "occurrences: >=$count ($ret)\n" if $DEBUG > 1;
+    print STDERR "</subquery>\n" if $DEBUG > 1;
     $self->reset() if $count;
     return $ret;
   }
@@ -1416,7 +1408,7 @@ sub claim_search_win {
 	  # backtrack
 	  $matched_nodes->[$pos2match_pos->[$$query_pos]]=undef;
 	  $$query_pos--;	# backtrack
-	  print STDERR ("backtrack to $$query_pos\n") if $DEBUG;
+	  print STDERR ("backtrack to $$query_pos\n") if $DEBUG > 1;
 	  $iterator=$iterators->[$$query_pos];
 
 	  $node = $iterator->node;
@@ -1429,11 +1421,11 @@ sub claim_search_win {
 	  $have->{$node}=1 if $node;
 	  next;
 	} else {
-	  print STDERR "no match\n" if $DEBUG;
+	  print STDERR "no match\n" if $DEBUG > 1;
 	  return;		# NO RESULT
 	}
       } else {
-	print STDERR ("match $node->{id} [$$query_pos,$pos2match_pos->[$$query_pos]]: $node->{afun}.$node->{t_lemma}.$node->{functor}\n") if $DEBUG;
+	print STDERR ("match $node->{id} [$$query_pos,$pos2match_pos->[$$query_pos]]: $node->{afun}.$node->{t_lemma}.$node->{functor}\n") if $DEBUG > 1;
 
 	if ($$query_pos<$#$iterators) {
 	  $$query_pos++;
@@ -1448,7 +1440,7 @@ sub claim_search_win {
 	  next;
 
 	} else {
-	  print STDERR ("complete match [bool: $opts->{boolean}]\n") if $DEBUG;
+	  print STDERR ("complete match [bool: $opts->{boolean}]\n") if $DEBUG > 1;
 	  # complete match:
 	  if ($opts->{boolean}) {
 	    return 1;
@@ -1587,7 +1579,7 @@ sub claim_search_win {
     my @parent_edge;
     for my $i (0..$#$query_nodes) {
       my $n = $query_nodes->[$i];
-      print "$i: $n->{name}\n" if $DEBUG;
+      print "$i: $n->{name}\n" if $DEBUG > 1;
       my $parent = $n->parent;
       my $p = $node2pos{$parent};
       $parent[$i]=$p;
