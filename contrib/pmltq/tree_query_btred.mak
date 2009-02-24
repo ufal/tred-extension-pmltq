@@ -836,7 +836,7 @@ sub claim_search_win {
       } elsif ($rel->value->{label} eq 'eparent') {
 	$iterator = EParentIterator->new($conditions);
       } else {
-	die "user-defined relation ".$rel->value->{label}." not yet implemented in BTrEd Search\n"
+	die "user-defined relation '".$rel->value->{label}."' unknown or not implemented in BTrEd Search\n"
       }
     } else {
       die "relation ".$relation." not yet implemented\n"
@@ -1001,9 +1001,9 @@ sub claim_search_win {
 	  return ('( $$query_pos < '.$target_pos.' ? '.int(!$opts->{negative}).' : '.$condition.')');
 	}
       } else {
-	# this node is matched by some super-query
+	# this node is referred to from some super-query
 	if ($target_match_pos > $self->{parent_query_match_pos}) {
-	  # we need to postpone the evaluation of the whole sub-query up-till $matched_nodes->[$target_pos] is known
+	  # we need to postpone the evaluation of the whole sub-query up-till $matched_nodes->[$target_match_pos] is known
 	  $self->{postpone_subquery_till}=$target_match_pos if ($self->{postpone_subquery_till}||0)<$target_match_pos;
 	}
 	return $condition;
@@ -1054,7 +1054,8 @@ sub claim_search_win {
 	my $target_pos = TredMacro::Index($self->{pos2match_pos},$postpone_subquery_till);
 	if (defined $target_pos) {
 	  # same subquery, simply postpone, just like when recomputing conditions
-	  my $postpone_pos = $postpone_subquery_till;
+	  # my $postpone_pos = $postpone_subquery_till;
+	  $opts->{recompute_condition}[$postpone_subquery_till]{$pos}=1;
 	  return ('( $$query_pos < '.$target_pos.' ? '.int(!$opts->{negative}).' : '.$condition.')');
 	} else {
 	  print "other subquery\n" if $DEBUG;
@@ -1341,7 +1342,7 @@ sub claim_search_win {
     my ($self,$seed,$test_max) = (shift,shift,shift);
     $self->reset();
     my $count=0;
-    print STDERR "<subquery>\n" if $DEBUG;
+    print STDERR "<subquery>\n";# if $DEBUG;
     while ($self->find_next_match({boolean => 1, seed=>$seed})) {
       last unless $count<=$test_max;
       $count++;
@@ -1432,7 +1433,7 @@ sub claim_search_win {
 	  return;		# NO RESULT
 	}
       } else {
-	print STDERR ("match $node->{id} [$$query_pos,$pos2match_pos->[$$query_pos]]: $node->{t_lemma}.$node->{functor}\n") if $DEBUG;
+	print STDERR ("match $node->{id} [$$query_pos,$pos2match_pos->[$$query_pos]]: $node->{afun}.$node->{t_lemma}.$node->{functor}\n") if $DEBUG;
 
 	if ($$query_pos<$#$iterators) {
 	  $$query_pos++;
@@ -2252,27 +2253,30 @@ sub claim_search_win {
   sub start  {
     my ($self,$node,$fsfile)=@_;
     $self->[FILE]=$fsfile;
-    $self->[NODES] = $self->get_node_list($node);
-    my $n = $self->[NODES]->[0];
-    return $self->[CONDITIONS]->($n,$self->file) ? $n : ($n && $self->next);
+    my $nodes = $self->[NODES] = $self->get_node_list($node);
+    my $n = $nodes->[0];
+    return ($n && $self->[CONDITIONS]->(@$n)) ? $n->[0] : ($n->[0] && $self->next);
   }
   sub next {
     my ($self)=@_;
     my $nodes = $self->[NODES];
     my $conditions=$self->[CONDITIONS];
     shift @{$nodes};
-    my $fsfile = $self->file;
-    while ($nodes->[0] and !$conditions->($nodes->[0],$fsfile)) {
+    my $n;
+    while (($n = $nodes->[0]) and !$conditions->(@$n)) {
       shift @{$nodes};
     }
-    return $nodes->[0];
+    return $nodes->[0][0];
   }
   sub node {
     my ($self)=@_;
-    return $self->[NODES]->[0];
+    my $n = $self->[NODES][0];
+    return $n && $n->[0];
   }
   sub file {
-    return $_[0]->[FILE];
+    my ($self)=@_;
+    my $n = $self->[NODES][0];
+    return $n && $n->[1];
   }
   sub reset {
     my ($self)=@_;
@@ -2290,13 +2294,11 @@ sub claim_search_win {
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
-    return [grep defined, map {
-        # my $id = $_; # $id=~s/^.*?#//;
-        PML_T::GetANodeByID($_,$self->[SimpleListIterator::FILE])
-      } TredMacro::ListV($node->attr('a/aux.rf'))];
-  }
-  sub file {
-    return PML_T::AFile($_[0]->[SimpleListIterator::FILE]);
+    my $a_file = PML_T::AFile($self->[SimpleListIterator::FILE]);
+    return [map {
+      my $n = PML_T::GetANodeByID($_,$self->[SimpleListIterator::FILE]);
+      defined $n ? [$n,$a_file] : ()
+    } TredMacro::ListV($node->attr('a/aux.rf'))];
   }
 }
 #################################################
@@ -2316,20 +2318,17 @@ sub claim_search_win {
   sub get_node_list  {
     my ($self,$node)=@_;
     my $fsfile = $self->[SimpleListIterator::FILE];
-    return [grep defined, map {
+    return [map {
       my $id = $_;
-      $id=~s/^(.*)?#//; my $ref = $1;
-      if ($ref) {
-	my $ref_fs = $fsfile->appData('ref')->{$ref};
-	$ref_fs ? PML::GetNodeByID($id,$ref_fs) : ();
+      $id=~s/^(.*)?#//;
+      if ($1) {
+	my $ref_fs = $fsfile->appData('ref')->{$1};
+	my $n = $ref_fs && PML::GetNodeByID($id,$ref_fs);
+	$ref_fs && $n ? [$n, $ref_fs] : ();
       } else {
-	PML::GetNodeByID($id,$fsfile);
+	[PML::GetNodeByID($id,$fsfile)||undef, $fsfile]
       }
     } PMLInstance::get_all($node,$self->[ATTR])];
-  }
-  sub file {
-    warn(__PACKAGE__."->file() has yet to be implemented correctly!\n");
-    return PML_T::AFile($_[0]->[SimpleListIterator::FILE]);
   }
 }
 #################################################
@@ -2338,10 +2337,10 @@ sub claim_search_win {
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
-    return [PML_T::GetANodes($node,$self->[SimpleListIterator::FILE])];
-  }
-  sub file {
-    return PML_T::AFile($_[0]->[SimpleListIterator::FILE]);
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    my $a_file = PML_T::AFile($fsfile);
+    my $n = $a_file && PML_T::GetANodes($node,$fsfile);
+    return [ $n ? [$n,$a_file] : ()];
   }
 }
 #################################################
@@ -2350,9 +2349,11 @@ sub claim_search_win {
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
-    return [grep defined, map {
-      PML::GetNodeByID($_)
-      } TredMacro::ListV($node->attr('coref_text.rf'))];
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    return [map {
+      my $n = PML::GetNodeByID($_);
+      $n ? [ $n, $fsfile ] : ()
+    } TredMacro::ListV($node->attr('coref_text.rf'))];
   }
 }
 #################################################
@@ -2361,9 +2362,11 @@ sub claim_search_win {
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
-    return [grep defined, map {
-      PML::GetNodeByID($_)
-      } TredMacro::ListV($node->attr('coref_gram.rf'))];
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    return [map {
+      my $n = PML::GetNodeByID($_);
+      $n ? [ $n, $fsfile ] : ()
+    } TredMacro::ListV($node->attr('coref_gram.rf'))];
   }
 }
 #################################################
@@ -2372,9 +2375,11 @@ sub claim_search_win {
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
-    return [grep defined, map {
-      PML::GetNodeByID($_)
-      } TredMacro::ListV($node->attr('compl.rf'))];
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    return [map {
+      my $n = PML::GetNodeByID($_);
+      $n ? [ $n, $fsfile ] : ()
+    } TredMacro::ListV($node->attr('compl.rf'))];
   }
 }
 #################################################
@@ -2384,12 +2389,15 @@ sub claim_search_win {
   sub get_node_list  {
     my ($self,$node)=@_;
     my $type = $node->type->get_base_type_name;
-    return [$type eq 't-node.type' ?
-	      PML_T::GetEParents($node) :
-		  $type eq 'a-node.type' ?
-		    PML_A::GetEParents($node,\&PML_A::DiveAuxCP) :
-			()
-		       ];
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    return [
+      map [ $_,$fsfile ],
+      ($type eq 't-node.type' ?
+	 PML_T::GetEParents($node) :
+	     $type eq 'a-node.type' ?
+	       PML_A::GetEParents($node,\&PML_A::DiveAuxCP) :
+		   ())
+	   ];
   }
 }
 #################################################
@@ -2399,11 +2407,14 @@ sub claim_search_win {
   sub get_node_list  {
     my ($self,$node)=@_;
     my $type = $node->type->get_base_type_name;
-    return [$type eq 't-node.type' ?
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    return [
+      map [ $_,$fsfile ],
+      ($type eq 't-node.type' ?
 	      PML_T::GetEChildren($node) :
 		  $type eq 'a-node.type' ?
 		    PML_A::GetEChildren($node,\&PML_A::DiveAuxCP) :
-			()
+			())
 		       ];
   }
 }
