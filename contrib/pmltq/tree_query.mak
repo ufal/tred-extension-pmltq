@@ -2,6 +2,7 @@
 
 #include <contrib/pml/PML.mak>
 
+package Tree_Query::TrEd; # so that it gets reloaded
 package Tree_Query::Common; # so that it gets reloaded
 package Tree_Query::NG2PMLTQ; # so that it gets reloaded
 package Tree_Query::SQLEvaluator; # so that it gets reloaded
@@ -1466,6 +1467,7 @@ sub GetSearch {
 sub Search {
   shift unless ref($_[0]);
   my $opts=$_[0] || {};
+  ChangingFile(0);
   unless ($SEARCH) {
     SelectSearch() || return;
   }

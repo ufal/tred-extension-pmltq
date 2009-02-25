@@ -169,20 +169,23 @@ sub get_schema_for_type {
 
 sub _get_fsfile {
   my ($self)=@_;
+  my $fsfile = $self->{fsfile};
+  return $fsfile if $fsfile;
   my $file = $self->{file};
   my $fl;
   if ($file) {
-    return $file if ref($file) and UNIVERSAL::isa($file,'FSFile');
-    return first { $_->filename eq $file } GetOpenFiles();
+    if (ref($file) and UNIVERSAL::isa($file,'FSFile')) {
+      $self->{file} = $file->filename;
+      return $self->{fsfile} = $file;
+    } else {
+      return $self->{fsfile} =  first { $_->filename eq $file } GetOpenFiles();
+    }
   } elsif ($fl = GetFileList($self->{filelist})) {
     my %fl;
     my @files = $fl->files;
-    #    print "@files\n";
     @fl{ @files } = ();
-    my $fsfile = ((first { exists($fl{$_->filename}) } GetOpenFiles())||
-	     $files[0] && Open(AbsolutizeFileName($files[0],$fl->filename),{-preload=>1}))
-      || return;
-    return $fsfile;
+    return $self->{fsfile} = ((first { exists($fl{$_->filename}) } GetOpenFiles())||
+				$files[0] && Open(AbsolutizeFileName($files[0],$fl->filename),{-preload=>1}));
   }
 }
 
@@ -276,7 +279,7 @@ use strict;
 use warnings;
 BEGIN { import TredMacro  }
 
-use base qw(Tree_Query::TypeMapper);
+use base qw(Tree_Query::TrEd Tree_Query::TypeMapper);
 
 $Tree_Query::TrEdSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
 
@@ -324,7 +327,9 @@ sub reconfigure {
 sub search_first {
   my ($self, $opts)=@_;
   $opts||={};
-  local $SIG{__DIE__} = sub { confess(@_) };
+  local $SIG{__DIE__} = sub {
+    confess(@_)
+  } if $DEBUG>1;
   my $query = $opts->{query} || $root;
   $self->{query}=$query;
   $self->{evaluator} = Tree_Query::BtredEvaluator->new($query,
@@ -336,6 +341,8 @@ sub search_first {
   $self->{past_results}=[];
   $self->{next_results}=[];
   $self->{have_all_results}=undef;
+  $self->{currentFilePos} = 0;
+  $self->{currentFilelistPos} = 0;
   return $self->show_next_result;
 }
 
@@ -344,55 +351,97 @@ sub current_query {
   return $self->{query};
 }
 
-sub show_next_result {
-  my ($self)=@_;
-  return unless $self->{evaluator};
-  if ($self->{current_result}) {
-    push @{$self->{past_results}},
-      $self->{current_result};
-  }
-  if ($self->{next_results} and @{$self->{next_results}}) {
-    $self->{current_result} = pop @{$self->{next_results}};
-    return $self->show_current_result;
-  }
-  if ($self->{have_all_results}) {
-    QuestionQuery('TrEdSearch','No more matches','OK');
-    return;
-  }
-  my @save = ($grp,$root,$this);
-  $grp=$self->claim_search_win;
-  if ($self->{current_result}) {
-    Open($self->{current_result}->[0]);
-  } else {
-    if ($self->{filelist}) {
-#      SetCurrentFileList($self->{filelist});
-      GotoFileNo(0);
+sub have_results {
+  my ($self) = @_;
+  return $self->{evaluator} ? 1 : 0;
+}
+
+sub prepare_results {
+  my ($self,$dir,$wins)=@_;
+  if ($dir eq 'next') {
+    return unless $self->{evaluator};
+    if ($self->{current_result}) {
+      push @{$self->{past_results}},
+	$self->{current_result};
+    }
+    if ($self->{next_results} and @{$self->{next_results}}) {
+      $self->{current_result} = pop @{$self->{next_results}};
+    } elsif ($self->{have_all_results}) {
+      QuestionQuery('TrEdSearch','No more matches','OK');
     } else {
-      GotoTree(0);
+      my $search_win;
+      # try to find the window to continue the search in
+      if ($self->{filelist}) {
+	# find a window displaying the searched filelist
+	$search_win = first {
+	  my $fl = TredMacro::GetCurrentFileList($_);
+	  $fl && $fl->name eq $self->{filelist}
+	}  @$wins;
+	print STDERR "search_win (filelist): $search_win\n";
+      } elsif ($self->{file}) {
+	# find a window displaying the searched file
+	if (UNIVERSAL::isa($self->{file},'FSFile')) {
+	  $search_win = first { $_->{FSFile} == $self->{file} } @$wins;
+	} else {
+	  $search_win = first {
+	    my $fsfile = $_->{FSFile};
+	    $fsfile && ($fsfile->filename eq $self->{file})
+	  } @$wins;
+	}
+      }
+      # no window? ok, use the first one
+      $search_win ||= $wins->[0];
+      die "No search window to use!" if ! $search_win;
+
+      my @save = ($grp,$root,$this);
+      $grp=$search_win;
+
+      local $search_win->{noRedraw}=1;
+      if ($self->{filelist}) {
+	SetCurrentFileList($self->{filelist},$search_win);
+	GotoFileNo($self->{current_result} ? $self->{currentFilelistPos} : 0);
+	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 1);
+	print STDERR "Current filename: ", ThisAddress(),"\n" if $DEBUG > 1;
+      } else {
+	Open($self->{file},{-keep_related=>1});
+	GotoTree($self->{current_result} ? $self->{currentFilePos} : 0);
+      }
+      my $result;
+      eval {
+	$result = $self->{evaluator}->find_next_match();
+	my $result_files = $self->{evaluator}->get_result_files;
+	if ($result) {
+	  $self->{current_result} = [
+	    map ThisAddress($result->[$_],$result_files->[$_]), 0..$#$result
+	   ];
+	} else {
+	  $self->{have_all_results}=1;
+	}
+      };
+      $self->{currentFilePos} = CurrentTreeNumber($search_win);
+      $self->{currentFilelistPos} = CurrentFileNo($search_win);
+      # $Redraw='all';
+      ($grp,$root,$this)=@save;
+      die $@ if $@;
+      unless ($result) {
+	QuestionQuery('TrEdSearch','No more matches','OK');
+      }
+    }
+  } elsif ($dir eq 'prev') {
+    return unless $self->{evaluator};
+    if ($self->{past_results} and @{$self->{past_results}}) {
+      if ($self->{current_result}) {
+	push @{$self->{next_results}},
+	  $self->{current_result};
+      }
+      $self->{current_result} = pop @{$self->{past_results}};
     }
   }
-  my $result;
-  eval {
-    $result = $self->{evaluator}->find_next_match();
-    my $result_files = $self->{evaluator}->get_result_files;
-    if ($result) {
-      $self->{current_result} = [
-	map ThisAddress($result->[$_],$result_files->[$_]), 0..$#$result
-      ];
-    } else {
-      $self->{have_all_results}=1;
-    }
-  };
-  $Redraw='all';
-  ($grp,$root,$this)=@save;
-  die $@ if $@;
-  if ($result) {
-    $self->select_matching_node($this);
-  } else {
-    QuestionQuery('TrEdSearch','No more matches','OK');
-  }
-  $self->update_label;
-  return $self->{current_result};
+}
+
+sub get_nth_result_filename {
+  my ($self,$idx)=@_;
+  return $self->{current_result}[$idx];
 }
 
 sub update_label {
@@ -403,45 +452,6 @@ sub update_label {
     .' of '
     .($self->{next_results} ? $past+int(@{$self->{next_results}}) : $past)
     .($self->{have_all_results} ? '' : '+');
-}
-
-sub show_prev_result {
-  my ($self)=@_;
-  if ($self->{past_results} and @{$self->{past_results}}) {
-    if ($self->{current_result}) {
-      push @{$self->{next_results}},
-	$self->{current_result};
-    }
-    $self->{current_result} = pop @{$self->{past_results}};
-    return $self->show_current_result;
-  }
-  return;
-}
-
-sub show_current_result {
-  my ($self)=@_;
-  $self->update_label;
-  return unless $self->{current_result};
-  my $idx = $self->node_index_in_last_query($this);
-  $idx ||= 0;
-  my @save = ($grp,$root,$this);
-  my $address = $self->{current_result}[$idx];
-  my ($file) = ParseNodeAddress($address);
-  $grp=$self->claim_search_win($file);
-  Open($address,{-keep_related=>1});
-  Redraw($grp);
-  ($grp,$root,$this)=@save;
-  return $self->{current_result};
-}
-
-sub matching_nodes {
-  my ($self,$filename,$tree_number,$tree)=@_;
-  return unless $self->{current_result};
-  my @matching;
-  my $fn = $filename.'##'.($tree_number+1);
-  my @nodes = ($tree,$tree->descendants);
-  my @positions = map { /^\Q$fn\E\.(\d+)$/ ? $1 : () } @{$self->{current_result}};
-  return @nodes[@positions];
 }
 
 sub map_nodes_to_query_pos {
@@ -835,6 +845,8 @@ sub claim_search_win {
 	$iterator = EChildIterator->new($conditions);
       } elsif ($rel->value->{label} eq 'eparent') {
 	$iterator = EParentIterator->new($conditions);
+      } elsif (0) {
+	$iterator = PMLRFIterator->new($conditions,'a/lex.rf');
       } else {
 	die "user-defined relation '".$rel->value->{label}."' unknown or not implemented in BTrEd Search\n"
       }
@@ -1801,12 +1813,14 @@ sub claim_search_win {
     my ($self)=@_;
     my $conditions=$self->[CONDITIONS];
     my $n=$self->[NODE];
+    print "grp: $grp\n";
     my $fsfile = $grp->{FSFile};
     while ($n) {
       $n = $n->following
 	|| (TredMacro::NextTree() && $this ) 
 	||  (TredMacro::NextFile() && ($fsfile=$grp->{FSFile}) && $this)
 	  ;
+      TredMacro::FPosition();
       last if $conditions->($n,$fsfile);
     }
     return $self->[NODE]=$n;
@@ -2318,7 +2332,8 @@ sub claim_search_win {
 	my $n = $ref_fs && PML::GetNodeByID($id,$ref_fs);
 	$ref_fs && $n ? [$n, $ref_fs] : ();
       } else {
-	[PML::GetNodeByID($id,$fsfile)||undef, $fsfile]
+	my $n = PML::GetNodeByID($id,$fsfile);
+	$n ? [$n, $fsfile] : ()
       }
     } PMLInstance::get_all($node,$self->[ATTR])];
   }
@@ -2331,8 +2346,7 @@ sub claim_search_win {
     my ($self,$node)=@_;
     my $fsfile = $self->[SimpleListIterator::FILE];
     my $a_file = PML_T::AFile($fsfile);
-    my $n = $a_file && PML_T::GetANodes($node,$fsfile);
-    return [ $n ? [$n,$a_file] : ()];
+    return [ $a_file ? map [$_,$a_file ], PML_T::GetANodes($node,$fsfile) : () ];
   }
 }
 #################################################

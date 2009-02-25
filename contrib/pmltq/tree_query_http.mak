@@ -19,6 +19,7 @@ package TrEd::PMLTQ::UserAgent;
 }
 
 package Tree_Query::HTTPSearch;
+use base qw(Tree_Query::TrEd);
 use Benchmark;
 use Carp;
 use strict;
@@ -119,65 +120,6 @@ sub identify {
   return $ident;
 }
 
-sub _find_shown_result_indexes {
-  my ($self,$wins)=@_;
-  my $cur_res = $self->{current_result};
-  my %seen;
-  for my $win (@$wins) {
-    my $idx = GetMinorModeData('Tree_Query_Results','index',$win);
-    if (defined($idx) and $idx<@$cur_res) {
-      my $m = $cur_res->[$idx];
-      $seen{$idx}=$win;
-      if ($m=~/^(([^#]+)(?:\#\#\d+))/) {
-	$seen{$1}=$win;
-	$seen{$2}=$win;
-      }
-    }
-  }
-  return \%seen;
-}
-
-sub _assign_first_result_index_not_shown {
-  my ($self,$seen,$win)=@_;
-  $win||=$grp;
-  $seen||=$self->_find_shown_result_indexes([ grep { IsMinorModeEnabled('Tree_Query_Results',$_) } TrEdWindows() ]);
-  my $cur_res = $self->{current_result};
-  return unless ref $cur_res and @$cur_res;
-  # first try a specific file
-  for my $i (0..$#{$cur_res}) {
-    next if $seen->{$i};
-    my $m = $cur_res->[$i];
-    if ($m=~/^(([^#]+)(?:\#\#\d+))/g) {
-      if (!$seen->{$2}) {
-	$seen->{$i}=$win;
-	$seen->{$2}=$win;
-	$seen->{$1}=$win;
-	return $i;
-      }
-    }
-  }
-  # first then a specific tree
-  for my $i (0..$#{$cur_res}) {
-    next if $seen->{$i};
-    my $m = $cur_res->[$i];
-    if ($m=~/^(([^#]+)(?:\#\#\d+))/g) {
-      return $i if !$seen->{$2};
-      if (!$seen->{$1}) {
-	$seen->{$i}=$win;
-	$seen->{$1}=$win;
-	return $i;
-      }
-    }
-  }
-  # then a specific query node
-  for my $i (0..$#{$cur_res}) {
-    if (!$seen->{$i}) {
-      $seen->{$i}=$win;
-      return $i;
-    }
-  }
-  return;
-}
 
 sub search_first {
   my ($self, $opts)=@_;
@@ -317,21 +259,6 @@ sub current_query {
   return $self->{query};
 }
 
-sub show_next_result {
-  my ($self)=@_;
-  return $self->show_result('next');
-}
-
-sub show_prev_result {
-  my ($self)=@_;
-  return $self->show_result('prev');
-}
-
-sub show_current_result {
-  my ($self)=@_;
-  return $self->show_result('current');
-}
-
 sub resolve_path {
   my ($self,$path)=@_;
   my $cfg = $self->{config}{data};
@@ -340,15 +267,6 @@ sub resolve_path {
   return qq{${url}data/$path};
 }
 
-sub matching_nodes {
-  my ($self,$filename,$tree_number,$tree)=@_;
-  return unless $self->{current_result};
-  my $fn = $filename.'##'.($tree_number+1);
-  my @nodes = ($tree,$tree->descendants);
-  my @positions = map { /^\Q$fn\E\.(\d+)$/ ? $1 : () }
-    map { $self->resolve_path($_) } @{$self->{current_result}};
-  return @nodes[@positions];
-}
 
 sub map_nodes_to_query_pos {
   my ($self,$filename,$tree_number,$tree)=@_;
@@ -606,91 +524,36 @@ sub init {
   $self->check_server_version;
 }
 
-sub show_result {
+
+sub prepare_results {
   my ($self,$dir)=@_;
-  my @save = ($this,$root,$grp);
-  return unless ($self->{current_result} and $self->{last_query_nodes}
-	and @{$self->{current_result}} and @{$self->{last_query_nodes}});
-  my @wins=$self->get_result_windows();
-  my $seen=$self->_find_shown_result_indexes(\@wins);
-  $self->update_label('Loading results ...');
-  eval {
-    { # attempt to locate the current node in one of the windows
-      my $idx = Index($self->{last_query_nodes},$this);
-      if (defined $idx) {
-	# ok, this window shows the query
-	unless ($seen->{$idx}) {
-	  # this node is not shown in any window
-	    my $m = $self->{current_result}[$idx];
-	    if ($m=~/^(([^#]+)(?:\#\#\d+))/g) {
-	      my $win = $seen->{$1}||$seen->{$2};
-	      if ($win) {
-		SetMinorModeData('Tree_Query_Results','index',$idx,$win);
-		$seen->{$idx}=$win;
-	      } else {
-		$win=$wins[0];
-		SetMinorModeData('Tree_Query_Results','index',$idx,$win);
-		$seen->{$idx}=$win;
-		$seen->{$1}=$win;
-		$seen->{$2}=$win;
-	      }
-	    }
-	  }
-      }
+  my $no = $self->{current_result_no};
+  if ($dir eq 'prev') {
+    if ($no>0) {
+      $self->{current_result_no} = --$no;
+      $self->{current_result}=[$self->idx_to_pos($self->{results}[$no])];
     }
-    my $no = $self->{current_result_no};
-    if ($dir eq 'prev') {
-      if ($no>0) {
-	$self->{current_result_no} = --$no;
-	$self->{current_result}=[$self->idx_to_pos($self->{results}[$no])];
-      }
-    } elsif ($dir eq 'next') {
-      if ($no<$#{$self->{results}}) {
-	$self->{current_result_no} = ++$no;
-	$self->{current_result}=[$self->idx_to_pos($self->{results}[$no])];
-      }
+  } elsif ($dir eq 'next') {
+    if ($no<$#{$self->{results}}) {
+      $self->{current_result_no} = ++$no;
+      $self->{current_result}=[$self->idx_to_pos($self->{results}[$no])];
     }
-    for my $win (@wins) {
-      $grp=$win;
-      my $idx = GetMinorModeData('Tree_Query_Results','index');
-      local $win->{noRedraw}=1;
-      if (!defined($idx) or $idx>$#{$self->{last_query_nodes}}) {
-	$idx = $self->_assign_first_result_index_not_shown($seen,$win);
-	SetMinorModeData('Tree_Query_Results','index',$idx);
-      }
-      if (defined $idx) {
-	my $result_fn = $self->resolve_path($self->{current_result}[$idx]);
-	Open($result_fn,{-keep_related=>1});
-      } else {
-	CloseFileInWindow($win);
-      }
-      $win->{noRedraw}=0;
-      unless ($win==$save[2]) {
-	Redraw($win);
-      } else {
-	$save[0]=CurrentNodeInOtherWindow($win);
-      }
-    }
-  };
-  my $err=$@;
-  $self->update_label;
-  ($this,$root,$grp)=@save;
-  die $err if $err;
-  return;
-}
-
-
-sub get_result_windows {
-  my ($self)=@_;
-  my @wins = grep { IsMinorModeEnabled('Tree_Query_Results',$_) } TrEdWindows();
-  unless (@wins) {
-    my $win = SplitWindowVertically();
-    EnableMinorMode('Tree_Query_Results',$win);
-    die $@ if $@;
-    @wins=($win);
   }
-  return @wins;
 }
+
+sub have_results {
+  my ($self) = @_;
+  ($self->{current_result} and $self->{last_query_nodes}
+     and @{$self->{current_result}} and @{$self->{last_query_nodes}}) ? 1 : 0;
+}
+
+sub get_nth_result_filename {
+  my ($self,$idx)=@_;
+  $self->resolve_path($self->{current_result}[$idx])
+}
+
+
+
 
 sub update_label {
   my ($self,$text)=@_;
