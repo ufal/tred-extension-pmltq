@@ -39,7 +39,6 @@ sub init_search {
       specific_relations =>  $type_mapper && $type_mapper->get_specific_relations(),
     });
     DetermineNodeType($_) for $query_tree->descendants;
-    print STDERR "Parsed $query\n";
   } else {
     my ($query_fn,$query_id)=@ARGV;
     my $query_file = FSFile->newFSFile($query_fn,[Backends()]);
@@ -137,6 +136,7 @@ sub count_matches {
 {
 
 package Tree_Query::TypeMapper;
+use PMLSchema;
 use strict;
 use warnings;
 
@@ -222,8 +222,49 @@ sub get_node_types {
   return [map Tree_Query::Common::DeclToQueryType( $_ ), map $_->node_types, $self->get_schemas];
 }
 
+sub _find_pmlrf_relations {
+  my ($self)=@_;
+  my @schemas = $self->get_schemas;
+  my @relations=();
+  my %relations;
+  for my $schema (@schemas) {
+    for my $type ($schema->node_types) {
+      my $type_name = Tree_Query::Common::DeclToQueryType($type);
+      for my $path ($type->get_paths_to_atoms({ no_childnodes => 1 })) {
+	my $decl = $type->find($path);
+	$decl=$decl->get_content_decl unless $decl->is_atomic;
+	if ($decl->get_decl_type == PML_CDATA_DECL and
+	    $decl->get_format eq 'PMLREF') {
+	  push @relations, $path;
+	  $relations{$type_name}{$path}='#any';
+	}
+      }
+    }
+  }
+  $self->{pmlrf_relations_hash}=\%relations;
+  return $self->{pmlrf_relations} = \@relations;
+}
+
+sub get_pmlrf_relations {
+  my ($self)=@_;
+  return $self->{pmlrf_relations} || $self->_find_pmlrf_relations;
+}
+
+sub get_pmlrf_relations_hash {
+  my ($self)=@_;
+  my $hash = $self->{pmlrf_relations_hash};
+  unless ($hash) {
+    $self->_find_pmlrf_relations;
+    $hash = $self->{pmlrf_relations_hash};
+  }
+  return $hash;
+}
+
+
 sub get_specific_relations {
-  return [qw(echild eparent a/lex.rf|a/aux.rf a/lex.rf a/aux.rf coref_text.rf coref_gram.rf compl.rf val_frame.rf)]
+  my ($self)=@_;
+  return [qw(echild eparent a/lex.rf|a/aux.rf), 
+	  @{$self->get_pmlrf_relations}];
 }
 
 my %user_defined_relations = (
@@ -240,7 +281,7 @@ my %user_defined_relations = (
   },
 );
 
-my %specific_relations = (
+my %known_pmlref_relations = (
   't-root' => {
     'a/lex.rf' => 'a-root',
   },
@@ -260,8 +301,11 @@ my %specific_relations = (
 
 sub get_relation_target_type {
   my ($self,$node_type,$relation)=@_;
-  return $specific_relations{$node_type} && $specific_relations{$node_type}{$relation}
-           || $user_defined_relations{$node_type} && $user_defined_relations{$node_type}{$relation};
+  my $pmlref_relations_hash = $self->get_pmlrf_relations_hash;
+  return $known_pmlref_relations{$node_type} && $known_pmlref_relations{$node_type}{$relation}
+       || $user_defined_relations{$node_type} && $user_defined_relations{$node_type}{$relation}
+       || $pmlref_relations_hash->{$node_type} && $pmlref_relations_hash->{$node_type}{$relation}
+	 ;
 }
 
 1;
@@ -360,7 +404,7 @@ sub prepare_results {
   my ($self,$dir,$wins)=@_;
   if ($dir eq 'next') {
     return unless $self->{evaluator};
-    if ($self->{current_result}) {
+    if ($self->{current_result} and !$self->{have_all_results}) {
       push @{$self->{past_results}},
 	$self->{current_result};
     }
@@ -377,7 +421,6 @@ sub prepare_results {
 	  my $fl = TredMacro::GetCurrentFileList($_);
 	  $fl && $fl->name eq $self->{filelist}
 	}  @$wins;
-	print STDERR "search_win (filelist): $search_win\n";
       } elsif ($self->{file}) {
 	# find a window displaying the searched file
 	if (UNIVERSAL::isa($self->{file},'FSFile')) {
@@ -404,13 +447,13 @@ sub prepare_results {
 	print STDERR "Current filename: ", ThisAddress(),"\n" if $DEBUG > 1;
       } else {
 	Open($self->{file},{-keep_related=>1});
-	GotoTree($self->{current_result} ? $self->{currentFilePos} : 0);
+	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 0);
       }
       my $result;
       eval {
 	$result = $self->{evaluator}->find_next_match();
-	my $result_files = $self->{evaluator}->get_result_files;
 	if ($result) {
+	  my $result_files = $self->{evaluator}->get_result_files;
 	  $self->{current_result} = [
 	    map ThisAddress($result->[$_],$result_files->[$_]), 0..$#$result
 	   ];
@@ -828,27 +871,28 @@ sub claim_search_win {
 	$iterator = AncestorIterator->new($conditions);
       }
     } elsif ($relation eq 'user-defined') {
-      if ($rel->value->{label} eq 'a/aux.rf') {
+      my $label = $rel->value->{label};
+      if ($label eq 'a/aux.rf') {
 	$iterator = AAuxRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'a/lex.rf') {
+      } elsif ($label eq 'a/lex.rf') {
 	$iterator = ALexRFIterator->new($conditions);
-	#$iterator = PMLRFIterator->new($conditions,'a/lex.rf');
-      } elsif ($rel->value->{label} eq 'a/lex.rf|a/aux.rf') {
+	#$iterator = PMLREFIterator->new($conditions,'a/lex.rf');
+      } elsif ($label eq 'a/lex.rf|a/aux.rf') {
 	$iterator = ALexOrAuxRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'coref_text.rf') {
+      } elsif ($label eq 'coref_text.rf') {
 	$iterator = CorefTextRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'coref_gram.rf') {
+      } elsif ($label eq 'coref_gram.rf') {
 	$iterator = CorefGramRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'compl.rf') {
+      } elsif ($label eq 'compl.rf') {
 	$iterator = ComplRFIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'echild') {
+      } elsif ($label eq 'echild') {
 	$iterator = EChildIterator->new($conditions);
-      } elsif ($rel->value->{label} eq 'eparent') {
+      } elsif ($label eq 'eparent') {
 	$iterator = EParentIterator->new($conditions);
-      } elsif (0) {
-	$iterator = PMLRFIterator->new($conditions,'a/lex.rf');
+      } elsif (first { $_ eq $label } @{$self->{type_mapper}->get_pmlrf_relations}) {
+	$iterator = PMLREFIterator->new($conditions,$label);
       } else {
-	die "user-defined relation '".$rel->value->{label}."' unknown or not implemented in BTrEd Search\n"
+	die "user-defined relation '".$label."' unknown or not implemented in BTrEd Search\n"
       }
     } else {
       die "relation ".$relation." not yet implemented\n"
@@ -1185,7 +1229,6 @@ sub claim_search_win {
 	my $pexp=$node;
 	for my $step (@$pt) {
 	  $step = '#content' if $step eq '[]';
-	  print STDERR "step: $step, pexp: $pexp, type: ", $decl->get_decl_type_str,", path: ",$decl->get_decl_path,"\n";
 	  my $decl_is = $decl->get_decl_type;
 	  if ($decl_is == PML_STRUCTURE_DECL or $decl_is == PML_CONTAINER_DECL) {
 	    my $m = $decl->get_member_by_name($step);
@@ -1471,7 +1514,7 @@ sub claim_search_win {
 #################################################
 {
   package Tree_Query::BtredPlanner;
-
+  use strict;
   use vars qw(%weight %reverse);
 
   %weight = (
@@ -1536,8 +1579,6 @@ sub claim_search_win {
     my $w = $weight{$name};
     return $w if defined $w;
     warn "do not have weight for edge: '$name'\n";
-    use Data::Dumper;
-    print Dumper(\%weight);
     return;
   }
   sub reversed_rel {
@@ -1692,6 +1733,7 @@ sub claim_search_win {
 #################################################
 {
   package Tree_Query::Iterator;
+  use strict;
   use constant CONDITIONS=>0;
   use Carp;
   sub new {
@@ -1708,6 +1750,7 @@ sub claim_search_win {
 #################################################
 {
   package FSFileIterator;
+  use strict;
   use Carp;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
@@ -1755,6 +1798,7 @@ sub claim_search_win {
 #################################################
 {
   package CurrentFileIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   BEGIN {
     import TredMacro qw($this $root);
@@ -1794,6 +1838,7 @@ sub claim_search_win {
 #################################################
 {
   package CurrentFilelistIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   BEGIN {
     import TredMacro qw($this $root $grp);
@@ -1813,7 +1858,6 @@ sub claim_search_win {
     my ($self)=@_;
     my $conditions=$self->[CONDITIONS];
     my $n=$self->[NODE];
-    print "grp: $grp\n";
     my $fsfile = $grp->{FSFile};
     while ($n) {
       $n = $n->following
@@ -1839,6 +1883,7 @@ sub claim_search_win {
 #################################################
 {
   package TreeIterator;
+  use strict;
   use Carp;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
@@ -1880,6 +1925,7 @@ sub claim_search_win {
 #################################################
 {
   package SameTreeIterator;
+  use strict;
   use Carp;
   use base qw(TreeIterator);
   sub new  {
@@ -1898,6 +1944,7 @@ sub claim_search_win {
 #################################################
 {
   package OptionalIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
   use constant ITERATOR=>1;
@@ -1941,6 +1988,7 @@ sub claim_search_win {
 #################################################
 {
   package ChildnodeIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
   use constant NODE=>1;
@@ -1978,6 +2026,7 @@ sub claim_search_win {
 #################################################
 {
   package DescendantIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
   use constant NODE=>1;
@@ -2022,6 +2071,7 @@ sub claim_search_win {
 #################################################
 {
   package DescendantIteratorWithBoundedDepth;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use Carp;
   use constant CONDITIONS=>0;
@@ -2096,6 +2146,7 @@ sub claim_search_win {
 #################################################
 {
   package ParentIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
   use constant NODE=>1;
@@ -2124,6 +2175,7 @@ sub claim_search_win {
 #################################################
 {
   package AncestorIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
   use constant NODE=>1;
@@ -2158,6 +2210,7 @@ sub claim_search_win {
 #################################################
 {
   package AncestorIteratorWithBoundedDepth;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use Carp;
   use constant CONDITIONS=>0;
@@ -2218,6 +2271,7 @@ sub claim_search_win {
 #################################################
 {
   package ALexRFIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
   use constant NODE=>1;
@@ -2251,6 +2305,7 @@ sub claim_search_win {
 #################################################
 {
   package SimpleListIterator;
+  use strict;
   use base qw(Tree_Query::Iterator);
   use constant CONDITIONS=>0;
   use constant NODES=>1;
@@ -2297,6 +2352,7 @@ sub claim_search_win {
 #################################################
 {
   package AAuxRFIterator;
+  use strict;
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
@@ -2309,7 +2365,8 @@ sub claim_search_win {
 }
 #################################################
 {
-  package PMLRFIterator;
+  package PMLREFIterator;
+  use strict;
   use base qw(SimpleListIterator);
   use constant ATTR => SimpleListIterator::FIRST_FREE;
   use Carp;
@@ -2341,6 +2398,7 @@ sub claim_search_win {
 #################################################
 {
   package ALexOrAuxRFIterator;
+  use strict;
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
@@ -2352,6 +2410,7 @@ sub claim_search_win {
 #################################################
 {
   package CorefTextRFIterator;
+  use strict;
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
@@ -2365,6 +2424,7 @@ sub claim_search_win {
 #################################################
 {
   package CorefGramRFIterator;
+  use strict;
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
@@ -2378,6 +2438,7 @@ sub claim_search_win {
 #################################################
 {
   package ComplRFIterator;
+  use strict;
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
@@ -2391,6 +2452,7 @@ sub claim_search_win {
 #################################################
 {
   package EParentIterator;
+  use strict;
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
@@ -2409,6 +2471,7 @@ sub claim_search_win {
 #################################################
 {
   package EChildIterator;
+  use strict;
   use base qw(SimpleListIterator);
   sub get_node_list  {
     my ($self,$node)=@_;
