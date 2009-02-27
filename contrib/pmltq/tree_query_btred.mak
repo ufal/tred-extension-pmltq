@@ -219,7 +219,7 @@ sub get_decl_for {
 
 sub get_node_types {
   my ($self)=@_;
-  return [map Tree_Query::Common::DeclToQueryType( $_ ), map $_->node_types, $self->get_schemas];
+  return [sort map Tree_Query::Common::DeclToQueryType( $_ ), map $_->node_types, $self->get_schemas];
 }
 
 sub _find_pmlrf_relations {
@@ -242,7 +242,7 @@ sub _find_pmlrf_relations {
     }
   }
   $self->{pmlrf_relations_hash}=\%relations;
-  return $self->{pmlrf_relations} = \@relations;
+  return $self->{pmlrf_relations} = [sort @relations];
 }
 
 sub get_pmlrf_relations {
@@ -589,9 +589,6 @@ sub claim_search_win {
     'parent' => q($start->parent == $end),
     'child' => q($end->parent == $start),
 
-    'order-precedes' => q($start->get_order < $end->get_order ), # not very effective !!
-    'order-follows' => q($end->get_order < $start->get_order ), # not very effective !!
-
     'depth-first-precedes' => q( $start->root==$end->root and  do{my $n=$start->following; $n=$n->following while ($n and $n!=$end); $n ? 1 : 0 }), # not very effective !!
     'depth-first-follows' => q( $start->root==$end->root and  do{my $n=$end->following; $n=$n->following while ($n and $n!=$start); $n ? 1 : 0 }), # not very effective !!
     'same-tree-as' => q($start->root==$end->root), # not very effective !!
@@ -634,6 +631,7 @@ sub claim_search_win {
 
     my @debug;
     my %name2pos;
+    my %name2type;
     # maps node position in a (sub)query to a position of the matching node in $matched_nodes
     # we avoid using hashes for efficiency
     my $self = bless {
@@ -655,6 +653,7 @@ sub claim_search_win {
       type_mapper => $opts->{type_mapper},
 
       name2pos => \%name2pos,
+      name2type => \%name2type,
       parent_pos => undef,
       pos2match_pos => undef,
       name2match_pos => undef,
@@ -770,6 +769,10 @@ sub claim_search_win {
 	  }
 	}
       }
+      %name2type = map {
+	my $name = lc($_->{name});
+	(defined($name) and length($name)) ? ($name=>$_->{'node-type'}) : ()
+      } @all_query_nodes;
     }
 
     # compile condition testing functions and create iterators
@@ -1091,10 +1094,11 @@ sub claim_search_win {
       my @occ = map {
 	(length($_->{min}) || length($_->{max})) ?
 	  ((length($_->{min}) ? $_->{min} : undef),
-	   (length($_->{max}) ? $_->{max} : undef)) : (1,undef)
+	   (length($_->{max}) ? $_->{max}+1 : undef)) : (1,undef)
       } TredMacro::AltV($node->{occurrences});
       my $occ_list =
-	TredMacro::max(map {int($_)} @occ).','.join(',',(map { defined($_) ? $_ : 'undef' } @occ));
+	TredMacro::max(map {int($_)} @occ)
+	    .','.join(',',(map { defined($_) ? $_ : 'undef' } @occ));
       my $condition = q`(($backref or $matched_nodes->[`.$match_pos.q`]=$node) and `. # trick: the subquery may ask about the current node
 	qq/\$sub_queries[$sq_pos]->test_occurrences(\$node,$occ_list))/;
       my $postpone_subquery_till = $subquery->{postpone_subquery_till};
@@ -1125,7 +1129,23 @@ sub claim_search_win {
       if ($relation eq 'user-defined') {
 	$label = $rel->value->{label};
 	$expression = $test_user_defined_relation{$label};
-	die "User-defined relation '$label' not supported test!\n" unless defined $expression;
+	if (!defined $expression) {
+	  if (first { $_ eq $label } @{$self->{type_mapper}->get_pmlrf_relations}) {
+	    return $self->serialize_element(
+	      {
+		%$opts,
+		name => 'test',
+		condition => {
+		  '#name' => 'test',
+		  a => '$'.$target.'.id',
+		  b => $label,
+		  operator => '=',
+		},
+	      });
+	  } else {
+	    die "User-defined relation '$label' not supported test!\n";
+	  }
+	}
       } else {
 	if ($relation eq 'descendant' or $relation eq 'ancestor') {
 	  my ($min,$max)=
@@ -1139,6 +1159,40 @@ sub claim_search_win {
 		((defined($min) or defined($max)) ? '$l++;' : '').
 	      ' }'.
 	      ' ($n and $n!='.$START.' and $n=='.$END.(defined($min) ? ' and '.$min.'<=$l' : '').') ? 1 : 0}';
+	} elsif ($relation eq 'order-precedes' or
+		   $relation eq 'order-follows') {
+	  my ($attr1,$attr2) =
+	    # map {
+	    #   defined($_) ? (m{/} ? qq(attr(q{$_})) : qq({$_})) : undef
+	    # }
+	    map {
+	      if (defined) {
+		my $decl = $self->{type_mapper}->get_decl_for($_);
+		if ($decl->get_decl_type == PML_ELEMENT_DECL) {
+		  $decl = $decl->get_content_decl;
+		}
+		my ($m)=$decl->find_members_by_role('#ORDER');
+		defined($m) && $m->get_name
+	      } else { undef }
+	    } ($opts->{type}, $self->{name2type}{$target});
+	  die "Could not determine ordering attribute for node '$opts->{id}'\n"
+	    unless defined $attr1;
+	  die "Could not determine ordering attribute for node '$target'\n"
+	    unless defined $attr2;
+	  # $expression = qq(\$start->$attr1)
+	  #               .($relation eq 'order-precedes' ? ' < ' : ' > ')
+	  #               .qq(\$end->$attr2 )
+	  return $self->serialize_element(
+	    {
+	      %$opts,
+	      name => 'test',
+	      condition => {
+	  	'#name' => 'test',
+	  	a => $attr1,
+	  	b => '$'.$target.'.'.$attr2,
+	  	operator => ($relation eq 'order-precedes' ? ' < ' : ' > '),
+	      },
+	    });
 	} else {
 	  $expression = $test_relation{$relation};
 	}
@@ -1198,15 +1252,17 @@ sub claim_search_win {
 	push @{$opts->{foreach}}, [2];
 	return $self->serialize_expression_pt($pt->[0],$opts);
       } elsif ($type eq 'ATTR' or $type eq 'REF_ATTR') {
-	my ($node);
+	my ($node,$node_type);
 	if ($type eq 'REF_ATTR') {
 	  my $target = lc($pt->[0]);
 	  $pt=$pt->[1];
 	  die "Error in attribute reference of node $target in expression $opts->{expression} of node '$this_node_id'"
 	    unless shift(@$pt) eq 'ATTR'; # not likely
 	  $node=$self->serialize_target($target,$opts);
+	  $node_type = $self->{name2type}{$target};
 	} else {
 	  $node='$node';
+	  $node_type = $opts->{type};
 	}
 	# Below we resolve the attribute path according to the PML schema
 	# we use $opts->{foreach} array to store information
@@ -1217,7 +1273,7 @@ sub claim_search_win {
         #       type==0 if expression produces at most one value (to be wrapped with an if defined)
 	my $attr=join('/',@$pt);
 	$attr=~s{\bcontent\(\)}{#content}g; # translate from PML-TQ notation to PML notation
-	my $type_decl = $self->{type_mapper}->get_decl_for($opts->{type});
+	my $type_decl = $self->{type_mapper}->get_decl_for($node_type);
 	if (!$type_decl) {
 	  die "Cannot resolve attribute path $attr on an unknown node type '$opts->{type}'\n";
 	  # where follows a possible fallback:
@@ -1391,17 +1447,17 @@ sub claim_search_win {
     my $count=0;
     print STDERR "<subquery>\n" if $DEBUG>1;
     while ($self->find_next_match({boolean => 1, seed=>$seed})) {
-      last unless $count<=$test_max;
       $count++;
+      last unless $count<=$test_max;
       $self->backtrack(0); # this is here to count on DISTINCT
       # roots of the subquery (i.e. the node with occurrences specified).
     }
-    my ($min,$max)=@_;
+    my ($min,$max_plus1)=@_;
     my $ret=0;
     while (@_) {
-      ($min,$max)=(shift,shift);
+      ($min,$max_plus1)=(shift,shift);
       if ((!defined($min) || $count>=$min) and
-	    (!defined($max) || $count<=$max)) {
+	    (!defined($max_plus1) || $count<$max_plus1)) {
 	$ret=1;
 	last;
       }
