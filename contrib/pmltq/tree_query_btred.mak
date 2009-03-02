@@ -582,7 +582,7 @@ sub claim_search_win {
   use strict;
   use Scalar::Util qw(weaken);
   use List::Util qw(first);
-  import TredMacro qw(SeqV);
+  import TredMacro qw(SeqV uniq);
   use PMLSchema;
 
   my %test_relation = (
@@ -930,6 +930,7 @@ sub claim_search_win {
     # $filter->{return}
     # $filter->{sort_by}
 
+    my $is_first_query = defined($opts->{column_count}) ? 0 : 1;
     my $distinct = $filter->{distinct} || 0;
     my @group_by = @{ $filter->{'group-by'} || [] };
     my @return = @{ $filter->{return} || [] };
@@ -937,41 +938,65 @@ sub claim_search_win {
 
     print "Serializing: g: @group_by, r: @return, s: @sort_by\n";
 
-    my %return_aggregations;
-    my @aggregations;
-    my @return_exp = map $self->serialize_column($_, {
-	%$opts,
-	var_prefix => 'v',
-        local_aggregations => \%return_aggregations,
-	aggregations => \@aggregations,
-        column_count => @group_by || $opts->{column_count}
-      }), @return;
-    my %input_aggregations;
+    my $i;
 
+    my @foreach;
+    my $foreach_idx = 0;
+    my @input_columns;
+    my %input_aggregations;
+    my %group_columns;
     my @group_by_exp = map { $self->serialize_column($_, {
 	%$opts,
 	var_prefix => 'g',
+	columns_used => \%group_columns,
+	foreach => ($is_first_query ? \@foreach : undef),
+	input_columns => ($is_first_query ? \@input_columns : undef),
         local_aggregations => \%input_aggregations,
 	aggregations => undef, # not applicable
         column_count => $opts->{column_count},
       }) } @group_by;
+
+    my @aggregations;
+    my %return_aggregations;
+    my %return_columns;
+    my @return_vars;
+    $i = 0;
+    my @return_exp = map $self->serialize_column($_, {
+	%$opts,
+	var_prefix => 'v',
+	foreach => ($is_first_query && !@group_by ? \@foreach : undef),
+	input_columns => ($is_first_query && !@group_by ? \@input_columns : undef),
+	columns_used => \%return_columns,
+	vars_used => ($return_vars[$i++]={}),
+        local_aggregations => \%return_aggregations,
+	aggregations => \@aggregations,
+        column_count => @group_by || $opts->{column_count}
+      }), @return;
     my %sort_aggregations;
+    my %sort_columns;
     my @sort_by_exp = map $self->serialize_column($_, {
 	%$opts,
 	var_prefix => 'v',
+	foreach => ($is_first_query && !@group_by ? \@foreach : undef),
+	input_columns => ($is_first_query  && !@group_by ? \@input_columns : undef),
         local_aggregations => \%sort_aggregations,
+	columns_used => \%sort_columns,
 	aggregations => undef, # not applicable
         column_count => scalar @return,
       }), @sort_by;
     $opts->{column_count} = scalar @return;
 
     my @aggregations_exp;
+    my %aggregation_columns;
     if (@aggregations) {
       @aggregations_exp = map [$_->[0], #name
 	 [ # columns
 	   map $self->serialize_column($_, {
 	     %$opts,
 	     var_prefix => 'v',
+	     columns_used => \%aggregation_columns,
+	     foreach => ($is_first_query ? \@foreach : undef),
+	     input_columns => ($is_first_query ? \@input_columns : undef),
 	     local_aggregations => undef,
 	     aggregations => undef, # not applicable
 	     column_count => $opts->{column_count},
@@ -979,10 +1004,116 @@ sub claim_search_win {
 	 ]
 	], @aggregations;
     }
+    # first without any inner aggregations
+    if (@group_by) {
+      # use group_by template
+    } elsif (@aggregations and !keys(%return_aggregations)) {
+      # use the direct template
+    } elsif (!@aggregations and keys(%return_aggregations)) {
+    } elsif (@aggregations and keys(%return_aggregations)) {
+    } else {
+      # no aggregations at all
+      my @columns_used = uniq(sort keys(%return_columns));
+      my $code = q`
+      	{
+      	  init => sub {
+	    #<DISTINCT>
+      	    my ($self)=@_;
+      	    $self->{seen} = {};
+	    #</DISTINCT>
+      	  },
+      	  process_row => sub {
+      	    my ($self,$row)= @_;
+      	    my (_VARLIST_) = @$row[_COLNUMS_];
+      	    my $out = $self->{output};
+	    #<DISTINCT>
+      	    my @out_row = (
+	      _COLS_
+      	    );
+      	    my $key = join "\x0",map { defined $_ ? $_ : '' } @out_row;
+      	    unless (exists $self->{seen}{$k}) {
+      	      $self->{seen}{$k}=undef;
+      	      $out->{process_row}->($out,\@out_row);
+      	    }
+	    #</DISTINCT>
+	    #<ALL>
+	    $out->{process_row}->($out,[
+	      _COLS_
+	    ]);
+	    #</ALL>
+      	  },
+      	}`;
+      if ($distinct) {
+	$code =~ s{#<ALL>(.*?)#</ALL>}{}s;
+      } else {
+	$code =~ s{#<DISTINCT>(.*?)#</DISTINCT>}{}s;
+      }
+      my $varlist = join(',', map '$v'.$_, @columns_used);
+      my $colnums = join(',', map $_-1, @columns_used);
+      $code =~ s{_VARLIST_}{$varlist}g;
+      $code =~ s{_COLNUMS_}{$colnums}g;
+      my $i = 0;
+      my $cols = join (",\n	      ",
+		       map {
+			 my @vars_used = sort keys %{$return_vars[$i++]};
+			 if (@vars_used) {
+			   '(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
+			 } else {
+			   $_
+			 }
+		       } @return_exp);
+      $code =~ s{_COLS_}{$cols}g;
+      print "$code\n";
+    }
+    if ($is_first_query) {
+      my $code = q`
+         $first_filter->{process_row}->($first_filter, [
+           _COLS_
+         ]);
+      `;
+      print "#COLS: @input_columns\n";
+      my $cols = join (",\n           ",@input_columns);
+      $code =~ s{_COLS_}{$cols}g;
+
+      # now we simulate a left join
+      {
+	my @wrap_l;
+	my @wrap_r;
+	my $i=0;
+	my $indent=0;
+	foreach my $f (@foreach) { # he?
+	  if ($f->[0]==1) {
+	    push @wrap_l,
+	      [$indent,
+	       ($i && $f=~'$var'.($i-1)) ? qq`my \@var$i = defined(\$var`.($i-1).qq`) ? $f->[1] : ();` :
+		 qq`my \@var$i = $f->[1];`
+		];
+	    [$indent,qq`foreach my \$var$i (\@var$i ? \@var$i : (undef)) {`];
+	    unshift @wrap_r, [$i,qq`}`];
+	    $indent++;
+	  } elsif ($f->[0]==0) {
+	    push @wrap_l, [$indent,
+			   ($i && $f=~'$var'.($i-1)) ? qq`my \$var$i = defined(\$var`.($i-1).qq`) ? $f->[1] : undef;` :
+			     qq`my \$var$i = $f->[1];`];
+	  }
+	  $i ++;
+	}
+	$code = join('',
+		     map { ('  ' x ($_->[0]+10)).$_->[1]."\n" }
+		       (
+			 @wrap_l,
+			 [$indent,$code],
+			 @wrap_r
+			)
+		      );
+      }
+      print "$code\n";
+    }
 
     use Data::Dumper;
     print Dumper({
       filter => $filter,
+      foreach => \@foreach,
       aggregations => \@aggregations_exp,
       return_exp => \@return_exp,
       return_agg => \%return_aggregations,
@@ -1218,15 +1349,11 @@ sub claim_search_win {
   sub serialize_column {
     my ($self,$column,$opts)=@_;
     $opts||={};
-    my %depends_on;
-    my $foreach = [];
     my $pt = Tree_Query::parse_column_expression($column); # $pt stands for parse tree
     die "Invalid column expression '$column'" unless defined $pt;
     return $self->serialize_expression_pt($pt,{
       %$opts,
       output_filter => 1,
-      foreach => $foreach,
-      depends_on => \%depends_on,
       expression=>$column,
     });
   }
@@ -1573,10 +1700,16 @@ sub claim_search_win {
     if (ref($pt)) {
       my $type = shift @$pt;
       if ($type eq 'EVERY') {
+	if ($opts->{output_filter}) {
+	  die "Cannot use quantifier '*' in output filter: '$opts->{expression}'"
+	}
 	push @{$opts->{foreach}}, [2];
 	return $self->serialize_expression_pt($pt->[0],$opts);
       } elsif ($type eq 'ATTR' or $type eq 'REF_ATTR') {
 	my ($node,$node_type);
+	if ($opts->{output_filter} and defined($opts->{column_count})) {
+	  die "Attribute reference cannot be used in output filter columns whose input is not the body of the query: '$opts->{expression}'"
+	}
 	if ($type eq 'REF_ATTR') {
 	  my $target = lc($pt->[0]);
 	  $pt=$pt->[1];
@@ -1598,62 +1731,69 @@ sub claim_search_win {
 	my $attr=join('/',@$pt);
 	$attr=~s{\bcontent\(\)}{#content}g; # translate from PML-TQ notation to PML notation
 	my $type_decl = $self->{type_mapper}->get_decl_for($node_type);
+	my $ret;
 	if (!$type_decl) {
 	  die "Cannot resolve attribute path $attr on an unknown node type '$opts->{type}'\n";
 	  # where follows a possible fallback:
 	  $attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
-	  return qq{ $attr };
-	}
-	my $decl = $type_decl;
-	my $foreach = $opts->{foreach} ||= [];
-	my $pexp=$node;
-	for my $step (@$pt) {
-	  $step = '#content' if $step eq '[]';
-	  my $decl_is = $decl->get_decl_type;
-	  if ($decl_is == PML_STRUCTURE_DECL or $decl_is == PML_CONTAINER_DECL) {
-	    my $m = $decl->get_member_by_name($step);
-	    if (defined $m) {
-	      $decl=$m->get_content_decl;
-	    } else {
-	      $m = $decl->get_member_by_name($step.'.rf');
-	      if ($m and ($m->get_role||'') eq '#KNIT') {
-		$decl=$m->get_knit_content_decl;
-	      } elsif ($m and ($m->get_content_decl->get_role||'') eq '#KNIT') {
+	  $ret = qq{ $attr };
+	} else {
+	  my $decl = $type_decl;
+	  my $foreach = $opts->{foreach} ||= [];
+	  my $pexp=$node;
+	  for my $step (@$pt) {
+	    $step = '#content' if $step eq '[]';
+	    my $decl_is = $decl->get_decl_type;
+	    if ($decl_is == PML_STRUCTURE_DECL or $decl_is == PML_CONTAINER_DECL) {
+	      my $m = $decl->get_member_by_name($step);
+	      if (defined $m) {
 		$decl=$m->get_content_decl;
 	      } else {
-		die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find member '$step'\n" unless defined($m);
+		$m = $decl->get_member_by_name($step.'.rf');
+		if ($m and ($m->get_role||'') eq '#KNIT') {
+		  $decl=$m->get_knit_content_decl;
+		} elsif ($m and ($m->get_content_decl->get_role||'') eq '#KNIT') {
+		  $decl=$m->get_content_decl;
+		} else {
+		  die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find member '$step'\n" unless defined($m);
+		}
 	      }
-	    }
-	    #
-	    # value
-	    #
-	    push @$foreach, [0,$pexp.'->{qq('.quotemeta($step).')}'];
-	    $pexp = '$var'.$#$foreach;
-	  } elsif ($decl_is == PML_SEQUENCE_DECL) {
-	    my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find element '$step'\n";
-	    $decl = $e->get_content_decl;
-	    push @$foreach, [1,$pexp.'->values(qq('.quotemeta($step).'))'];
-	    $pexp = '$var'.$#$foreach;
-	  } elsif ($decl_is == PML_LIST_DECL) {
-	    $decl = $decl->get_knit_content_decl;
-	    if ($step =~ /^\[(\d+)\]$/) {
-	      push @$foreach, [0,$pexp.'->[$1]'];
+	      #
+	      # value
+	      #
+	      push @$foreach, [0,$pexp.'->{qq('.quotemeta($step).')}'];
 	      $pexp = '$var'.$#$foreach;
-	    } else {
-	      push @$foreach, [1,'@{'.$pexp.'}'];
+	    } elsif ($decl_is == PML_SEQUENCE_DECL) {
+	      my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find element '$step'\n";
+	      $decl = $e->get_content_decl;
+	      push @$foreach, [1,$pexp.'->values(qq('.quotemeta($step).'))'];
+	      $pexp = '$var'.$#$foreach;
+	    } elsif ($decl_is == PML_LIST_DECL) {
+	      $decl = $decl->get_knit_content_decl;
+	      if ($step =~ /^\[(\d+)\]$/) {
+		push @$foreach, [0,$pexp.'->[$1]'];
+		$pexp = '$var'.$#$foreach;
+	      } else {
+		push @$foreach, [1,'@{'.$pexp.'}'];
+		$pexp = '$var'.$#$foreach;
+		redo;
+	      }
+	    } elsif ($decl_is == PML_ALT_DECL) {
+	      $decl = $decl->get_content_decl;
+	      push @$foreach, [1,'AltV('.$pexp.')'];
 	      $pexp = '$var'.$#$foreach;
 	      redo;
+	    } else {
+	      die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' to an atomic type '".$decl->get_decl_path."'!\n";
 	    }
-	  } elsif ($decl_is == PML_ALT_DECL) {
-	    $decl = $decl->get_content_decl;
-	    push @$foreach, [1,'AltV('.$pexp.')'];
-	    $pexp = '$var'.$#$foreach;
-	    redo;
-	  } else {
-	    die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' to an atomic type '".$decl->get_decl_path."'!\n";
 	  }
+	  $ret = '$var'.$#$foreach;
 	}
-	return '$var'.$#$foreach
+	if ($opts->{output_filter}) {
+	  return $self->serialize_column_node_ref($ret,$opts);
+	} else {
+	  return $ret;
+	}
       } elsif ($type eq 'ANALYTIC_FUNC') {
 	my $name = shift @$pt;
 	die "The analytic function ${name}() can only be used in an output filter expression!\n"
@@ -1791,7 +1931,14 @@ sub claim_search_win {
 	$pt=q{'}.$pt.q{'};
       } elsif ($pt=~s/^\$//) {	# a plain variable
 	if ($pt eq '$') {
-	  return $self->serialize_target($this_node_id,$opts);
+	  my $ret = $self->serialize_target($this_node_id,$opts);
+	  if ($opts->{output_filter}) {
+	    die "Cannot use node reference '$$' at this point of an output filter: '$opts->{expression}'\n"
+	      if defined($opts->{column_count});
+	    return $self->serialize_column_node_ref($ret,$opts);
+	  } else {
+	    return $ret;
+	  }
 	} elsif ($pt =~ /^[1-9]\d*$/) { #column reference
 	  die "Column reference \$$pt can only be used in an output filter; error in expression '$opts->{expression}' of node '$this_node_id'\n"
 	    unless $opts->{'output_filter'};
@@ -1799,14 +1946,34 @@ sub claim_search_win {
 	    unless defined $opts->{'column_count'};
 	  die "Column reference \$$pt used at position where there are only $opts->{'column_count'} columns\n"
 	    if $pt > $opts->{'column_count'};
-	  return '$'.$opts->{var_prefix}.$pt;
+	  my $var = '$'.$opts->{var_prefix}.$pt;
+	  $opts->{columns_used}{$pt}=1;
+	  $opts->{vars_used}{$var}=1;
+	  return $var;
 	} else {
-	  return $self->serialize_target($pt,$opts);
+	  my $ret = $self->serialize_target($pt,$opts);
+	  if ($opts->{output_filter}) {
+	    die "Cannot use node reference '$pt' at this point of an output filter: '$opts->{expression}'\n"
+	      if defined($opts->{column_count});
+	    return $self->serialize_column_node_ref($ret,$opts);
+	  } else {
+	    return $ret;
+	  }
 	}
       } else {			# unrecognized token
 	die "Token '$pt' not recognized in expression $opts->{expression} of node '$this_node_id'\n";
       }
     }
+  }
+
+  sub serialize_column_node_ref {
+    my ($self, $ret, $opts)=@_;
+    push @{$opts->{input_columns}},$ret;
+    my $i = scalar @{$opts->{input_columns}};
+    my $var = '$'.$opts->{var_prefix}.$i;
+    $opts->{columns_used}{ $i }=1;
+    $opts->{vars_used}{$var}=1;
+    return $var;
   }
 
   sub serialize_expression {
