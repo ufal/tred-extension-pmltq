@@ -621,6 +621,7 @@ sub claim_search_win {
     # condition subroutines
     my @conditions;
     my @iterators;
+    my @filters;
     my @sub_queries;
     my $parent_query=$opts->{parent_query};
     my $matched_nodes = $parent_query ? $parent_query->{matched_nodes} : [];
@@ -638,6 +639,7 @@ sub claim_search_win {
 
       query_pos => 0,
       iterators => \@iterators,
+      filters => \@filters,
       conditions => \@conditions,
       have => \%have,
 
@@ -805,6 +807,9 @@ sub claim_search_win {
       }
       push @iterators, $iterator;
     }
+    unless ($self->{parent_query}) {
+      @filters = $self->serialize_filters($query_tree->{'output-filters'});
+    }
     return $self;
   }
 
@@ -905,6 +910,325 @@ sub claim_search_win {
     } else {
       return $iterator;
     }
+  }
+
+  sub serialize_filters {
+    my ($self,$filters,$opts)=@_;
+    return unless ref $filters;
+    $opts ||= {};
+    # first filter is special, it can refer to nodes
+    return map {
+      $self->serialize_filter($_,$opts)
+    } @$filters;
+  }
+
+  sub serialize_filter {
+    my ($self, $filter, $opts)=@_;
+
+    # $filter->{group_by}
+    # $filter->{distinct}
+    # $filter->{return}
+    # $filter->{sort_by}
+
+    my $distinct = $filter->{distinct} || 0;
+    my @group_by = @{ $filter->{'group-by'} || [] };
+    my @return = @{ $filter->{return} || [] };
+    my @sort_by = @{ $filter->{'sort-by'} || [] };
+
+    print "Serializing: g: @group_by, r: @return, s: @sort_by\n";
+
+    my %return_aggregations;
+    my @aggregations;
+    my @return_exp = map $self->serialize_column($_, {
+	%$opts,
+	var_prefix => 'v',
+        local_aggregations => \%return_aggregations,
+	aggregations => \@aggregations,
+        column_count => @group_by || $opts->{column_count}
+      }), @return;
+    my %input_aggregations;
+
+    my @group_by_exp = map { $self->serialize_column($_, {
+	%$opts,
+	var_prefix => 'g',
+        local_aggregations => \%input_aggregations,
+	aggregations => undef, # not applicable
+        column_count => $opts->{column_count},
+      }) } @group_by;
+    my %sort_aggregations;
+    my @sort_by_exp = map $self->serialize_column($_, {
+	%$opts,
+	var_prefix => 'v',
+        local_aggregations => \%sort_aggregations,
+	aggregations => undef, # not applicable
+        column_count => scalar @return,
+      }), @sort_by;
+    $opts->{column_count} = scalar @return;
+
+    my @aggregations_exp;
+    if (@aggregations) {
+      @aggregations_exp = map [$_->[0], #name
+	 [ # columns
+	   map $self->serialize_column($_, {
+	     %$opts,
+	     var_prefix => 'v',
+	     local_aggregations => undef,
+	     aggregations => undef, # not applicable
+	     column_count => $opts->{column_count},
+	   }), @{$_->[1]}
+	 ]
+	], @aggregations;
+    }
+
+    use Data::Dumper;
+    print Dumper({
+      filter => $filter,
+      aggregations => \@aggregations_exp,
+      return_exp => \@return_exp,
+      return_agg => \%return_aggregations,
+      group_by_exp => \@group_by_exp,
+      input_agg => \%input_aggregations,
+      sort_by_exp => \@sort_by_exp,
+      sort_agg => \%sort_aggregations,
+    });
+    # >> $1, 1 + sum(2*$1+$3), max($2+1)
+    # or
+    # >> $1, count()
+    # ERROR (mixing aggregation and non-aggregation)
+    #
+    #
+    # TODO:
+    # 1) combination of for ... give and ...(... over ...)
+    #
+    #  >> for $a.functor, $b.functor give
+    #    $1,$2, ratio(count() over $1)
+    #
+    # is same as
+    #
+    #  >> for $a.functor, $b.functor give
+    #    $1 & $2, count() div sum(count() over $1)
+    #
+    # and can be rewritten as:
+    #
+    #   >> for $a.functor, $b.functor give
+    #     $1,$2,count()
+    #   >> $1 & $2, ($3 div sum($3 over $1))
+    #
+    # 2) sort
+    # 3) distinct
+    #
+    # >> $1, $2, 2+sum($2 over $1)*max($1 over $2)
+    #
+    # $output_filter = {
+    #    init => sub {
+    #      my ($self)= @_;
+    #      $_->{init}->($_) for @{$self->{local_group}};
+    #      $_->{saved_rows} = [];
+    #    },
+    #    local_group => [
+    #        {
+    #          compile_filter('for $1 give sum($2)'),
+    #          finish => {
+    #            my %r;
+    #            for my $key (keys %{$self->{group}}) {
+    #              my $group = $self->{group}{$key};
+    #              $r{$key} = $group->finish;
+    #              %$group=(); # immediatelly cleanup group data
+    #            }
+    #            return \%r;
+    #          }
+    #        }
+    #        {
+    #          compile_filter('for $2 give max($1)'),
+    #          finish => # see above
+    #        }
+    #    ],
+    #    saved_rows => [],
+    #    process_row => sub {
+    #      my ($self,$row)= @_;
+    #      my ($v1,$v2) = @$row[0,1];
+    #      push @{$self->{saved_rows}}, [$v1,$v2]; # only save the columns we need
+    #
+    #      my $group1 = $self->{local_group}[0]; # for $1 give sum($2)
+    #      $group1->process_row($group1, $row);
+    #      
+    #      my $group2 = $self->{local_group}[1]; # for $2 give max($1)
+    #      $group2->process_row($group2, $row);
+    #    }
+    #    finish => sub {
+    #      my ($self)=@_;
+    #      my $saved_rows = $self->{saved_rows};
+    #      my $saved;
+    #      my $output = $self->{output};
+    #      my @local_group_results = map $_->finish, @{$self->{local_group}};
+    #      while ($saved = shift @$saved_rows) {
+    #        my ($v1,$v2) = @$saved; # recover saved columns
+    #        my $key1 = $1;
+    #        my $key2 = $2;
+    #        my $l1 = $local_group_results[0]{ $key1 };
+    #        my $l2 = $local_group_results[1]{ $key2 };
+    #        $output->process_row($output, [ $v1, $v2, 
+    #                                        defined($l1) && defined($l2) ? 2+$l1*$l2 : undef ]);
+    #      }
+    #    }
+    #
+
+    # >> for $1,substr($2,3,1),$3 give $1, sum(2*$1+$3), max($2+1)
+    #
+    # $output_filter = {
+    #    init => sub {
+    #      my ($self)= @_;
+    #      $self->{group} = {};
+    #    }
+    #    process_row => sub {
+    #      my ($self,$row)= @_;
+    #      my ($v1,$v2,$v3) = @$row[0,1,2];
+    #      my $g = [$v1, defined($v2) ? substr($v2,3,1) : undef, $v3];
+    #      my $key = join "\x0",map { defined $_ ? $_ : '' } @$g;
+    #      my $new;
+    #      my $group = $self->{group}{$key} ||= ($new = {
+    #        key => $g,
+    #        %{$self->{grouping}}
+    #      });
+    #      $group->init() if $new;
+    #      $group->process_row($group,$row);
+    #    },
+    #    grouping => {
+    #      init => sub {
+    #        my ($self)= @_;
+    #        $self->{aggregated}[0] = 0;     # init sum()
+    #        $self->{aggregated}[1] = undef; # init max()
+    #      },
+    #      process_row => sub {
+    #        my ($self,$row)= @_;
+    #        my $agg=0;
+    #        $_->($self,$agg++,$row) for @{$self->{aggregation}};
+    #      },
+    #      aggregation => [
+    #      # 0: sum(2*$1+$3)
+    #        sub {
+    #          my ($self, $i, $row)=@_;
+    #          my ($v1,$v3) = @$row[0,2];
+    #          $self->{aggregated}[$i] += ((2*$v1)+$v3) if defined($v1) and defined($v3);
+    #          return;
+    #        },
+    #      # 1: max($2+1)
+    #        sub {
+    #          my ($self, $i, $row)=@_;
+    #          my ($v2) = @$row[1];
+    #          my $max = $self->{aggregated}[$i];
+    #          $self->{aggregated}[$i] = $v2 if !defined($max) or (defined($v2) and $max<$v2+1);
+    #          return;
+    #        },
+    #      ]
+    #      finish => {
+    #        my ($self)=@_;
+    #        my ($v1) = @{$self->{key}}[0];
+    #        my ($a1,$a2) = @{$self->{aggregated}};
+    #        return $self->{result} = [
+    #          $v1,
+    #          defined($a1) ? 1 + $a1 : undef,
+    #          defined($a2) ? $a2 : undef,
+    #        ];
+    #      }
+    #    }
+    #    finish => {
+    #      my $out = $_[0]->{output};
+    #      for my $group (values %{$self->{group}}) {
+    #        my $r = $group->finish;
+    #        %$group=(); # immediatelly cleanup group data
+    #        $out->{process_row}($out,$r);
+    #      }
+    #    }
+    # }
+    #
+    # >> 1 + sum(2*$1+$3), max($2+1)
+    #
+    # this is basically equivalent to
+    # >> for 1 return 1 + sum(2*$1+$3), max($2+1)
+    # but optimized:
+    #
+    # $output_filter = {
+    #    init => sub {
+    #      my ($self)= @_;
+    #      $self->{aggregated}[0] = 0;     # init sum()
+    #      $self->{aggregated}[1] = undef; # init max()
+    #    }
+    #    process_row => sub {
+    #      my ($self,$row)= @_;
+    #      my $agg=0;
+    #      $_->($self,$agg++,$row) for @{$self->{aggregation}};
+    #    },
+    #    aggregation => [
+    #       # 0: sum(2*$1+$3)
+    #       sub {
+    #         my ($self, $i, $row)=@_;
+    #         my ($v1,$v3) = @$row[1,3];
+    #         $self->{aggregated}[$i] += ((2*$v1)+$v3) if defined($v1) and defined($v3);
+    #         return;
+    #       },
+    #       # 1: max($2+1)
+    #       sub {
+    #         my ($self, $i, $row)=@_;
+    #         my ($v2) = @$row[2];
+    #         my $max = $self->{aggregated}[$i];
+    #         $self->{aggregated}[$i] = $v2 if !defined($max) or (defined($v2) and $max<$v2+1);
+    #         return;
+    #       },
+    #    ]
+    #    finish => {
+    #      my $out = $_[0]->{output};
+    #      my ($a1,$a2) = @{$self->{aggregated}};
+    #      $out->{process_row}->($out, [
+    #        defined($a1) ? 1 + $a1 : undef,
+    #        defined($a2) ? $a2 : undef,
+    #      ])
+    #    }
+    # }
+    #
+    #  >> distinct 1 + $3, $2
+    #
+    # $output_filter = {
+    #    init => sub {
+    #      my ($self)=@_;
+    #      $self->{seen} = {};
+    #    },
+    #    seen => undef,
+    #    process_row => sub {
+    #      my ($self,$row)= @_;
+    #      my ($v2,$v3) = @$row[2,3];
+    #      my $out = $self->{output};
+    #      my $o = [
+    #        defined($v3) ? (1 + $v3) : undef,
+    #        $v2,
+    #      ];
+    #      my $key = join "\x0",map { defined $_ ? $_ : '' } @$o;
+    #      unless (exists $self->{seen}{$k}) {
+    #        $self->{seen}{$k}=undef;
+    #        $out->{process_row}->($out,$out_row);
+    #      }
+    #    },
+    # }
+    #
+    #
+    #
+    #
+  }
+
+  sub serialize_column {
+    my ($self,$column,$opts)=@_;
+    $opts||={};
+    my %depends_on;
+    my $foreach = [];
+    my $pt = Tree_Query::parse_column_expression($column); # $pt stands for parse tree
+    die "Invalid column expression '$column'" unless defined $pt;
+    return $self->serialize_expression_pt($pt,{
+      %$opts,
+      output_filter => 1,
+      foreach => $foreach,
+      depends_on => \%depends_on,
+      expression=>$column,
+    });
   }
 
   sub serialize_conditions {
@@ -1330,6 +1654,49 @@ sub claim_search_win {
 	  }
 	}
 	return '$var'.$#$foreach
+      } elsif ($type eq 'ANALYTIC_FUNC') {
+	my $name = shift @$pt;
+	die "The analytic function ${name}() can only be used in an output filter expression!\n"
+	  unless $opts->{'output_filter'};
+	my ($args,$over,$sort) = @$pt;
+	if ($args) {
+	  if ($name eq 'concat') {
+	    die "The analytic function $name takes one or two arguments concat(STR, SEPARATOR?) in the output filter expression $opts->{expression}; got @$args!\n" if @$args==0 or @$args>2;
+	    if (@$args==2) {
+	      unless (defined($args->[1]) and !ref($args->[1]) and $args->[1]!~/^\$/) {
+		die "The second argument to concat(STR, SEPARATOR?) must be a literal string or number in $opts->{expression}!\n";
+	      }
+	    }
+	  } elsif (@$args>1) {
+	    die "The analytic function $name takes at most one arguments in the output filter expression $opts->{expression}!\n";
+	  }
+	}
+	if ($over and @$over) {
+	  if ($opts->{local_aggregations}) {
+	    my $num = scalar keys %{$opts->{local_aggregations}};
+	    my @cols = map [map
+	      $self->serialize_expression_pt($_,{
+		%$opts,
+		local_aggregations => undef,
+	      }), @{$_||[]}], ($args,$over,$sort);
+	    my $key = $name.':'.join(';',map join(',',@$_), @cols);
+	    $opts->{local_aggregations}{ $key } = [
+	      $num,
+	      $name,
+	      @cols,
+	    ];
+	    return '$l'.$num;
+	  } else {
+	    die "Cannot use analytic function $name with an 'over' clause in this context in the output filter expression $opts->{expression}!\n";
+	  }
+	} else {
+	  if (!defined $opts->{aggregations}) {
+	    die "Cannot use analytic function $name without an 'over' clause in this context in the output filter expression $opts->{expression}!\n";
+	  }
+	  my $num = scalar @{ $opts->{aggregations} };
+	  push @{ $opts->{aggregations} }, [$name,$args];
+	  return '$a'.$num;
+	}
       } elsif ($type eq 'FUNC') {
 	my $name = $pt->[0];
 	my $args = $pt->[1];
@@ -1425,6 +1792,14 @@ sub claim_search_win {
       } elsif ($pt=~s/^\$//) {	# a plain variable
 	if ($pt eq '$') {
 	  return $self->serialize_target($this_node_id,$opts);
+	} elsif ($pt =~ /^[1-9]\d*$/) { #column reference
+	  die "Column reference \$$pt can only be used in an output filter; error in expression '$opts->{expression}' of node '$this_node_id'\n"
+	    unless $opts->{'output_filter'};
+	  die "Column reference \$$pt used at position where there is yet no column to refer to\n"
+	    unless defined $opts->{'column_count'};
+	  die "Column reference \$$pt used at position where there are only $opts->{'column_count'} columns\n"
+	    if $pt > $opts->{'column_count'};
+	  return '$'.$opts->{var_prefix}.$pt;
 	} else {
 	  return $self->serialize_target($pt,$opts);
 	}
