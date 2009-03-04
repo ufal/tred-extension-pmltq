@@ -621,7 +621,6 @@ sub claim_search_win {
     # condition subroutines
     my @conditions;
     my @iterators;
-    my @filters;
     my @sub_queries;
     my $parent_query=$opts->{parent_query};
     my $matched_nodes = $parent_query ? $parent_query->{matched_nodes} : [];
@@ -639,7 +638,7 @@ sub claim_search_win {
 
       query_pos => 0,
       iterators => \@iterators,
-      filters => \@filters,
+      filter => undef,
       conditions => \@conditions,
       have => \%have,
 
@@ -808,7 +807,12 @@ sub claim_search_win {
       push @iterators, $iterator;
     }
     unless ($self->{parent_query}) {
-      @filters = $self->serialize_filters($query_tree->{'output-filters'});
+      my ($init_code,$first_filter) = $self->serialize_filters($query_tree->{'output-filters'});
+      if ($init_code and $first_filter) {
+	print "INIT CODE:\n",$init_code,"\n";
+	$self->{filter} = eval $init_code; die $@ if $@;
+	$self->{first_filter} = $first_filter;
+      }
     }
     return $self;
   }
@@ -821,6 +825,30 @@ sub claim_search_win {
     my $self = shift;
     return $self->{result_files}
   }
+  sub run_filters {
+    my $self = shift;
+    if ($self->{filter}) {
+      $self->{filter}->($self);
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+  sub flush_filters {
+    my $self = shift;
+    if ($self->{first_filter}) {
+      return $self->{first_filter}->{finish}($self->{first_filter});
+    }
+    return;
+  }
+  sub init_filters {
+    my $self = shift;
+    if ($self->{first_filter}) {
+      return $self->{first_filter}->{init}($self->{first_filter});
+    }
+    return;
+  }
+
   sub r {
     my ($self,$name)=@_;
     return unless $self->{results};
@@ -917,9 +945,275 @@ sub claim_search_win {
     return unless ref $filters;
     $opts ||= {};
     # first filter is special, it can refer to nodes
-    return map {
-      $self->serialize_filter($_,$opts)
-    } @$filters;
+    my $prev;
+    my @filters = map $self->serialize_filter($_,$opts), @$filters;
+    for my $filter (@filters) {
+      if ($prev) {
+	$prev->{output}=$filter;
+      }
+      $prev = $filter;
+    }
+    if ($prev) {
+      $prev->{output}={
+	init => sub {
+	  print("-" x 60, "\n");
+	},
+	process_row => sub {
+	  my ($self,$row)=@_;
+	  print(join("\t",@$row)."\n");
+	},
+	finish => sub {
+	  print("-" x 60, "\n");
+	}
+      };
+    }
+    return ($opts->{filter_init},$filters[0]);
+  }
+
+  my %aggregation_template = (
+	  count => q`
+            sub {
+              my ($self, $i)=@_;
+               $self->{aggregated}[$i]++;
+            }`,
+	  _DEFAULT_ => q`
+            sub {
+              my ($self, $i, $row)=@_;
+              #<IF_LEN _FUNC_VARLIST_>
+              my (_FUNC_VARLIST_) = @$row[_FUNC_COLNUMS_];
+              #</IF_LEN>
+              #<IF_LEN _FUNC_DEFINED_>
+              if (_FUNC_DEFINED_) {
+              #</IF_LEN>
+                _FUNC_OP_
+              #<IF_LEN _FUNC_DEFINED_>
+              }
+              #</IF_LEN>
+            }`
+	 );
+	my %aggregation_init = (
+	  sum => '0',
+	  max => 'undef',
+	  min => 'undef',
+	  count => '0',
+	  avg => '[undef,0]',
+	  concat => '[]',
+#	  ratio => '0',
+	);
+  my %aggregation_op = (
+	  sum => q`$self->{aggregated}[$i] += _ARG_;`,
+	  max => q`my $max = $self->{aggregated}[$i];
+                   my $val = _ARG_;
+                   $self->{aggregated}[$i] = $val if !defined($max) or $max<$val`,
+	  min => q`my $min = $self->{aggregated}[$i];
+                   my $val = _ARG_;
+                   $self->{aggregated}[$i] = $val if !defined($min) or $val<$min`,
+	  avg => q`my $avg = $self->{aggregated}[$i];
+                   $self->{aggregated}[$i][0] += _ARG_;
+                   $self->{aggregated}[$i][1] ++;`, # shell we count null values as 0 ?
+	  concat => q`push @{$self->{aggregated}[$i]}, _ARG_;`, # shell we count null values as 0 ?
+	  #	  ratio => q`$self->{aggregated}[$i] += _ARG_;`, # not sure how to implement
+	 );
+  my %aggregation_final = (
+	  avg => q`_RESULT_ = (_RESULT_->[0] / _RESULT_->[1]);`, # shell we count null values as 0 ?
+	  concat => q`_RESULT_ = join(_ARG1_, @{_RESULT_});`, # shell we count null values as 0 ?
+	  #	  ratio => q`$self->{aggregated}[$i] += _ARG_;`, # not sure how to implement
+	 );
+
+  my %code_template = (
+    PLAIN => q`
+      	{
+      	  init => sub {
+	    #<IF_DISTINCT>
+      	    my ($self)=@_;
+      	    $self->{seen} = {};
+            my $out = $self->{output};
+	    $out->{init}($out);
+	    #</IF_DISTINCT>
+      	  },
+      	  process_row => sub {
+      	    my ($self,$row)= @_;
+            #<IF_LEN _RET_VARLIST_>
+      	    my (_RET_VARLIST_) = @$row[_RET_COLNUMS_];
+            #</IF_LEN>
+      	    my $out = $self->{output};
+	    #<IF_DISTINCT>
+      	    my @out_row = (
+	      _RET_COLS_
+      	    );
+      	    my $key = join "\x0",map { defined $_ ? $_ : '' } @out_row;
+      	    unless (exists $self->{seen}{$key}) {
+      	      $self->{seen}{$key}=undef;
+      	      $out->{process_row}->($out,\@out_row);
+      	    }
+	    #</IF_DISTINCT>
+	    #<IF_NOT_DISTINCT>
+	    $out->{process_row}->($out,[
+	      _RET_COLS_
+	    ]);
+	    #</IF_NOT_DISTINCT>
+      	  },
+          finish => sub {
+      	    my ($self)= @_;
+      	    my $out = $self->{output};
+	    $out->{finish}($out);
+          }
+      	}`,
+
+    # Example: >> $1, $2, 2+sum($2 over $1)*max($1 over $2)
+    AGGREGATE => q`
+          {
+	    init => sub {
+	      my ($self)= @_;
+	      _INIT_AGG_
+	    },
+	    process_row => sub {
+	      my ($self,$row)= @_;
+	      my $agg=0;
+	      $_->($self,$agg++,$row) for @{$self->{aggregation}};
+	    },
+	    aggregation => [
+	      _AGGREGATIONS_
+	     ],
+	    finish => sub {
+	      my ($self)=@_;
+              #<IF_LEN _RET_VARLIST_>
+	      my (_RET_VARLIST_) = @{$self->{key}}[_RET_COLNUMS_];
+              #</IF_LEN>
+	      _AGG_FINALIZE_
+              #<IF_RETURN>
+	       return $self->{result} = [
+		 _RET_COLS_
+	       ];
+              #</IF_RETURN>
+              #<IF_NOT_RETURN>
+              my $out = $self->{output};
+              $out->{process_row}->($out, [
+                _RET_COLS_
+              ]);
+              #</IF_NOT_RETURN>
+	     }
+	   }`,
+
+    GROUP => q`
+        {
+	  init => sub {
+	    my ($self)= @_;
+	    $self->{group} = {};
+	  },
+	  process_row => sub {
+	    my ($self,$row)= @_;
+            #<IF_LEN _GROUP_VARLIST_>
+	    my (_GROUP_VARLIST_) = @$row[_GROUP_COLNUMS_];
+            #</IF_LEN>
+	    my $g = [
+	      _GROUP_COLS_
+	    ];
+	    my $key = join "\x0",map { defined $_ ? $_ : '' } @$g;
+	    my $new;
+	    my $group = $self->{group}{$key} ||= ($new = {
+	      key => $key,
+	      %{$self->{grouping}}
+	     });
+	    $group->{init}->($group) if $new;
+	    $group->{process_row}->($group,$row);
+	  },
+	  grouping => _TEMPLATE_AGGREGATE_,
+	  finish => sub  {
+            my ($self)=@_;
+            #<IF_NOT_RETURN>
+	    my $out = $_[0]->{output};
+            $out->{init}($out);
+            #</IF_NOT_RETURN>
+	    #<IF_DISTINCT>
+            my %seen;
+	    #</IF_DISTINCT>
+	    for my $group (values %{$self->{group}}) {
+	      my $r = $group->{finish}->($group);
+	      #<IF_DISTINCT>
+              my $key = $group->{key};
+              next if exists $seen{$key};
+              $seen{$key}=$r;
+ 	      #</IF_DISTINCT>
+	      %$group=();	# immediatelly cleanup group data
+              #<IF_NOT_RETURN>
+	      $out->{process_row}($out,$r);
+              #</IF_NOT_RETURN>
+	    }
+            #<IF_NOT_RETURN>
+	    $out->{finish}($out);
+            #</IF_NOT_RETURN>
+            #<IF_RETURN>
+            return \%seen;
+            #</IF_RETURN>
+	  }
+	 };
+        `,
+    # Example: >> $1, $2, 2+sum($2 over $1)*max($1 over $2)
+  INNER_AGGREGATE =>  q`
+     {
+       init => sub {
+         my ($self)= @_;
+         $self->{init}->($_) for @{$self->{local_group}};
+         $self->{saved_rows} = [];
+       },
+       local_group => \@local_filters,
+       process_row => sub {
+         my ($self,$row)= @_;
+         push @{$self->{saved_rows}}, $row; # note: we could only save the columns we need
+	 $_->{process_row}->($_, $row) for @{$self->{local_group}};
+       },
+       finish => sub {
+         my ($self)=@_;
+         my $saved_rows = $self->{saved_rows};
+         my $row;
+         my $out = $self->{output};
+         my @l = map $_->{finish}->($_), @{$self->{local_group}};
+         while ($row = shift @$saved_rows) {
+	   #<IF_LEN _RET_VARLIST_>
+	   my (_RET_VARLIST_) = @$row[_RET_COLNUMS_];
+	   #</IF_LEN>
+           my @keys = (_LOCAL_GROUP_KEYS_); # group-expression of n-th filter
+           my (_LOCAL_VARLIST_) =
+	     map $l[$_]{ $keys[$_] }[0],
+	       0..$#l;
+           $out->{process_row}->($out, [
+	     _RET_COLS_
+	   ]);
+         }
+       }
+     }`,
+  );
+
+  # do several substitutions at once
+  sub _code_substitute {
+    my (undef, $map)=@_;
+    my $what = join('|',reverse sort keys %$map);
+    $_[0] =~ s{[ \t]*#<IF_LEN ($what)>\s*?\n(.*?)[ \t]*#</IF_LEN>\s*?\n}{
+      defined($map->{$1}) and length($map->{$1}) ? $2 : ''
+    }seg;
+    $_[0] =~ s{($what)}{ $map->{$1} }eg;
+  }
+  
+  sub _code_template_substitute {
+    my (undef, $map)=@_;
+    $_[0] =~ s{\b_TEMPLATE_([A-Z_]+)_\b}{
+      _code_from_template($1, $map->{_MAP_})
+    }eg;
+    if ($map) {
+      my $what = join('|',reverse sort keys %$map);
+      $_[0] =~ s{[ \t]*#<IF_((NOT_)?($what))>\s*?\n(.*?)[ \t]*#</IF_\1>\s*?\n}{
+	(($2 ? !$map->{$3} : $map->{$3}) ? $4 : '')
+      }seg;
+    }
+  }
+
+  sub _code_from_template {
+    my ($name,$map)=@_;
+    $map ||= {};
+    my $code = $code_template{$name};
+    _code_template_substitute($code, $map);
+    return $code;
   }
 
   sub serialize_filter {
@@ -930,12 +1224,18 @@ sub claim_search_win {
     # $filter->{return}
     # $filter->{sort_by}
 
+    use Data::Dumper;
+    print Dumper($filter);
+
     my $is_first_query = defined($opts->{column_count}) ? 0 : 1;
     my $distinct = $filter->{distinct} || 0;
+
+
     my @group_by = @{ $filter->{'group-by'} || [] };
     my @return = @{ $filter->{return} || [] };
     my @sort_by = @{ $filter->{'sort-by'} || [] };
 
+    print "----------------\n";
     print "Serializing: g: @group_by, r: @return, s: @sort_by\n";
 
     my $i;
@@ -945,12 +1245,14 @@ sub claim_search_win {
     my @input_columns;
     my %input_aggregations;
     my %group_columns;
+    my @group_vars;
     my @group_by_exp = map { $self->serialize_column($_, {
 	%$opts,
 	var_prefix => 'g',
 	columns_used => \%group_columns,
 	foreach => ($is_first_query ? \@foreach : undef),
 	input_columns => ($is_first_query ? \@input_columns : undef),
+	vars_used => ($group_vars[$i++]={}),
         local_aggregations => \%input_aggregations,
 	aggregations => undef, # not applicable
         column_count => $opts->{column_count},
@@ -972,113 +1274,316 @@ sub claim_search_win {
 	aggregations => \@aggregations,
         column_count => @group_by || $opts->{column_count}
       }), @return;
+
     my %sort_aggregations;
     my %sort_columns;
+    my @sort_vars;
     my @sort_by_exp = map $self->serialize_column($_, {
 	%$opts,
 	var_prefix => 'v',
 	foreach => ($is_first_query && !@group_by ? \@foreach : undef),
 	input_columns => ($is_first_query  && !@group_by ? \@input_columns : undef),
+	vars_used => ($sort_vars[$i++]={}),
         local_aggregations => \%sort_aggregations,
 	columns_used => \%sort_columns,
 	aggregations => undef, # not applicable
         column_count => scalar @return,
       }), @sort_by;
-    $opts->{column_count} = scalar @return;
+
 
     my @aggregations_exp;
-    my %aggregation_columns;
+    my @aggregations_columns;
+    my @aggregations_vars;
     if (@aggregations) {
-      @aggregations_exp = map [$_->[0], #name
+      my $i=-1;
+      @aggregations_exp = map {
+	my $j = 0;
+	$i++;
+	[$_->[0], #name
 	 [ # columns
 	   map $self->serialize_column($_, {
 	     %$opts,
 	     var_prefix => 'v',
-	     columns_used => \%aggregation_columns,
+	     columns_used => ($aggregations_columns[$i]||={}),
 	     foreach => ($is_first_query ? \@foreach : undef),
 	     input_columns => ($is_first_query ? \@input_columns : undef),
+	     vars_used => ($aggregations_vars[$i][$j++]={}),
 	     local_aggregations => undef,
 	     aggregations => undef, # not applicable
 	     column_count => $opts->{column_count},
 	   }), @{$_->[1]}
 	 ]
-	], @aggregations;
+	]
+      } @aggregations;
     }
+
+    $opts->{column_count} = scalar @return;
+    print "COLUMN_COUNT FOR NEXT FILTER: $opts->{column_count}\n";
+
+    my @local_filters;
+    my @local_group_keys;
+    for my $agg (values %return_aggregations) {
+      my ($num, $name, $args, $over, $sort_by, $over_exp, $vars_used) = @$agg;
+      # below we pass in something
+      # that looks like a filter
+      # but contains parse-trees instead of strings
+      print "SUBFILTER\n";
+      use Data::Dumper;
+      print Dumper({
+	name => $name,
+	args => $args,
+	over => $over,
+	over_exp => $over_exp,
+	vars_used => $vars_used,
+       });
+      $local_filters[$num] =
+	$self->serialize_filter(
+	  {
+	    'group-by' => Fslib::List->new(
+	      @$over
+	     ),
+	    'return' => Fslib::List->new(
+	      [
+	       'ANALYTIC_FUNC',
+	       $name,
+	       $args,
+	       undef,
+	       $sort_by,
+	      ]
+	    ),
+	  },
+	  {
+	    column_count => $opts->{column_count},
+	    code_map_flags => {
+	      RETURN => 1,
+	      DISTINCT => 1,
+	    }
+	  }
+	);
+
+      my $i = 0;
+      my $exp = join(",\n            ",
+		map {
+		  my @vars_used = sort keys %{$vars_used->[$i]};
+		  if (@vars_used) {
+		    '(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
+		  } else {
+		    $_
+		  }
+		} @$over_exp);
+      $local_group_keys[$num] =
+	@$over_exp > 1 ? 'join("\x0",'.$exp.')' : $exp;
+    }
+
+#@local_filters = 
+#            {
+#              compile_filter('for $1 give sum($2)'),
+#              finish => {
+#                my %r;
+#                for my $key (keys %{$self->{group}}) {
+#                  my $group = $self->{group}{$key};
+#                  $r{$key} = $group->finish;
+#                  %$group=(); # immediatelly cleanup group data
+#                }
+#                return \%r;
+#              }
+#            }
+#            {
+#              compile_filter('for $2 give max($1)'),
+#              finish => # see above
+#            }
+#        ],
+
+
+
+    # DEBUG:
+
+    use Data::Dumper;
+    print Dumper({
+      filter => $filter,
+      foreach => \@foreach,
+      aggregations => \@aggregations_exp,
+      return_exp => \@return_exp,
+      return_agg => \%return_aggregations,
+      group_by_exp => \@group_by_exp,
+      input_agg => \%input_aggregations,
+      sort_by_exp => \@sort_by_exp,
+      sort_agg => \%sort_aggregations,
+    });
+
+
+    my @columns_used = uniq(sort keys(%return_columns));
+    my @g_columns_used = uniq(sort keys(%group_columns));
+    my $varlist = join(',', map '$v'.$_, @columns_used);
+    my $colnums = join(',', map $_-1, @columns_used);
+    my $g_varlist = join(',', map '$g'.$_, @g_columns_used);
+    my $g_colnums = join(',', map $_-1, @g_columns_used);
+    my $agg_varlist = join(',', map '$a'.$_, 0..$#aggregations);
+    my $local_varlist = join(',',map '$l'.$_,0..$#local_filters);
+
+    my ($agg_final,$all_agg_code,$init_agg);
+    {
+      my $i = 0;
+      $init_agg =
+	join(";         \n",
+	map {
+	'$self->{aggregated}['.($i++).'] = '.$aggregation_init{ $_->[0] }."; # init $_->[0](...)"
+      } @aggregations_exp);
+
+      my (@agg_code, @agg_final);
+      $i = 0;
+      for my $aggr (@aggregations_exp) {
+	my $funcname = $aggr->[0];
+	my $args = $aggr->[1];
+	my $agg_code = $aggregation_template{$funcname} || $aggregation_template{_DEFAULT_} ;
+	my @columns_used = uniq(sort keys(%{$aggregations_columns[$i]}));
+	my $varlist = join(',', map '$v'.$_, @columns_used);
+	my $colnums = join(',', map $_-1, @columns_used);
+	my $defined = join(' && ', map 'defined($v'.$_.')', @columns_used);
+	my $op = $aggregation_op{$funcname};
+	if (defined $op) {
+	  _code_substitute($op,
+			   {
+			     _ARG_ => $args->[0],
+			   }
+			  )
+	}
+
+	# no substitutions on $agg_code past this point:
+	_code_substitute($agg_code,
+			 {
+			   _FUNC_VARLIST_ => $varlist,
+			   _FUNC_COLNUMS_ => $colnums,
+			   _FUNC_DEFINED_ => $defined,
+			   _FUNC_OP_ => $op,
+			 });
+
+	push @agg_code, "          # $funcname(...)\n".$agg_code;
+
+	push @agg_final, 'my $a'.$i.' = $self->{aggregated}['.$i.'];';
+	if (exists $aggregation_final{$funcname}) {
+	  my $final_code = $aggregation_final{$funcname};
+	  my $arg1;
+	  if ($funcname eq 'concat') {
+	    $arg1 = $aggregations_exp[$i][1];
+	    $arg1 = defined($arg1) and length($arg1) ? $arg1 : q('');
+	  }
+	  _code_substitute($final_code,
+			   {
+			     _RESULT_ => '$a'.$i,
+			     _ARG1_ => $arg1,
+			   });
+	  push @agg_final,$final_code;
+	}
+	$i++;
+      }
+
+      $agg_final = join('',map { "\n              ".$_ } @agg_final);
+      $all_agg_code = join(',',@agg_code);
+    }
+
+    my $cols = do {
+      my $i = 0;
+      join (",\n	      ",
+	    map {
+	      my @vars_used = sort keys %{$return_vars[$i++]};
+	      if (@vars_used) {
+		'(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
+	      } else {
+		$_
+	      }
+	    } @return_exp)
+    };
+    my $group_cols = do {
+      my $i = 0;
+      join (",\n	      ",
+	    map {
+	      my @vars_used = sort keys %{$group_vars[$i++]};
+	      if (@vars_used) {
+		'(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
+	      } else {
+		$_
+	      }
+	    } @group_by_exp)
+    };
+    my $local_group_keys = join (",\n	      ",@local_group_keys);
+
+    my $output_filter;
     # first without any inner aggregations
+    my $code;
     if (@group_by) {
       # use group_by template
+      if (!keys %input_aggregations and !keys(%return_aggregations)) {
+	$code = _code_from_template('GROUP', {
+	  _MAP_ => { RETURN => 1 },
+	  DISTINCT => $distinct,
+	  %{$opts->{code_map_flags}||{}},
+	});
+      } else {
+	die "TODO";
+      }
     } elsif (@aggregations and !keys(%return_aggregations)) {
       # use the direct template
+      $code = _code_from_template('AGGREGATE', {
+	RETURN => 0,
+	DISTINCT => $distinct,
+	%{$opts->{code_map_flags}||{}},
+      });
     } elsif (!@aggregations and keys(%return_aggregations)) {
+      $code = _code_from_template('INNER_AGGREGATE', {
+	RETURN => 0,
+	DISTINCT => $distinct,
+	%{$opts->{code_map_flags}||{}},
+      });
     } elsif (@aggregations and keys(%return_aggregations)) {
+      die "TODO";
     } else {
       # no aggregations at all
-      my @columns_used = uniq(sort keys(%return_columns));
-      my $code = q`
-      	{
-      	  init => sub {
-	    #<DISTINCT>
-      	    my ($self)=@_;
-      	    $self->{seen} = {};
-	    #</DISTINCT>
-      	  },
-      	  process_row => sub {
-      	    my ($self,$row)= @_;
-      	    my (_VARLIST_) = @$row[_COLNUMS_];
-      	    my $out = $self->{output};
-	    #<DISTINCT>
-      	    my @out_row = (
-	      _COLS_
-      	    );
-      	    my $key = join "\x0",map { defined $_ ? $_ : '' } @out_row;
-      	    unless (exists $self->{seen}{$k}) {
-      	      $self->{seen}{$k}=undef;
-      	      $out->{process_row}->($out,\@out_row);
-      	    }
-	    #</DISTINCT>
-	    #<ALL>
-	    $out->{process_row}->($out,[
-	      _COLS_
-	    ]);
-	    #</ALL>
-      	  },
-      	}`;
-      if ($distinct) {
-	$code =~ s{#<ALL>(.*?)#</ALL>}{}s;
-      } else {
-	$code =~ s{#<DISTINCT>(.*?)#</DISTINCT>}{}s;
-      }
-      my $varlist = join(',', map '$v'.$_, @columns_used);
-      my $colnums = join(',', map $_-1, @columns_used);
-      $code =~ s{_VARLIST_}{$varlist}g;
-      $code =~ s{_COLNUMS_}{$colnums}g;
-      my $i = 0;
-      my $cols = join (",\n	      ",
-		       map {
-			 my @vars_used = sort keys %{$return_vars[$i++]};
-			 if (@vars_used) {
-			   '(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
-			 } else {
-			   $_
-			 }
-		       } @return_exp);
-      $code =~ s{_COLS_}{$cols}g;
-      print "$code\n";
+      $code = _code_from_template('PLAIN', {
+	RETURN => 0,
+	DISTINCT => $distinct,
+	%{$opts->{code_map_flags}||{}},
+      });
     }
+
+    # below, user-data may be involved, we must do a one step-substitution
+    _code_substitute($code,
+		     {
+		       _AGGREGATIONS_ => $all_agg_code,
+		       _RET_VARLIST_ => $varlist,
+		       _GROUP_VARLIST_ => $g_varlist,
+		       _RET_COLNUMS_ => $colnums,
+		       _GROUP_COLNUMS_ => $g_colnums,
+		       _AGG_FINALIZE_ => $agg_final,
+		       _INIT_AGG_ => $init_agg,
+		       _GROUP_COLS_ => $group_cols,
+		       _RET_COLS_ => $cols,
+		       _LOCAL_VARLIST_ => $local_varlist,
+		       _LOCAL_GROUP_KEYS_ => $local_group_keys,
+		     }
+		    );
+      print "$code\n";
+      $output_filter = eval $code; die $@ if $@;
+
+
+
+    # filter_init:
     if ($is_first_query) {
       my $code = q`
          $first_filter->{process_row}->($first_filter, [
-           _COLS_
+           _RET_COLS_
          ]);
       `;
-      print "#COLS: @input_columns\n";
-      my $cols = join (",\n           ",@input_columns);
-      $code =~ s{_COLS_}{$cols}g;
-
+      # no substitutions past this point!
+      _code_substitute($code,
+		       {
+			 _RET_COLS_ => join (",\n           ",@input_columns),
+		       }
+		      );
       # now we simulate a left join
       {
-	my @wrap_l;
-	my @wrap_r;
+	my @wrap_l=[0,'sub {'];
+	my @wrap_r=([0,'}']);
 	my $i=0;
 	my $indent=0;
 	foreach my $f (@foreach) { # he?
@@ -1087,8 +1592,8 @@ sub claim_search_win {
 	      [$indent,
 	       ($i && $f=~'$var'.($i-1)) ? qq`my \@var$i = defined(\$var`.($i-1).qq`) ? $f->[1] : ();` :
 		 qq`my \@var$i = $f->[1];`
-		];
-	    [$indent,qq`foreach my \$var$i (\@var$i ? \@var$i : (undef)) {`];
+		],
+	      [$indent,qq`foreach my \$var$i (\@var$i ? \@var$i : (undef)) {`];
 	    unshift @wrap_r, [$i,qq`}`];
 	    $indent++;
 	  } elsif ($f->[0]==0) {
@@ -1103,25 +1608,16 @@ sub claim_search_win {
 		       (
 			 @wrap_l,
 			 [$indent,$code],
-			 @wrap_r
+			 @wrap_r,
 			)
 		      );
       }
       print "$code\n";
+      $opts->{filter_init} = $code;
     }
 
-    use Data::Dumper;
-    print Dumper({
-      filter => $filter,
-      foreach => \@foreach,
-      aggregations => \@aggregations_exp,
-      return_exp => \@return_exp,
-      return_agg => \%return_aggregations,
-      group_by_exp => \@group_by_exp,
-      input_agg => \%input_aggregations,
-      sort_by_exp => \@sort_by_exp,
-      sort_agg => \%sort_aggregations,
-    });
+    return $output_filter;
+
     # >> $1, 1 + sum(2*$1+$3), max($2+1)
     # or
     # >> $1, count()
@@ -1149,7 +1645,7 @@ sub claim_search_win {
     # 3) distinct
     #
     # >> $1, $2, 2+sum($2 over $1)*max($1 over $2)
-    #
+    # INNER_AGGREGATE:
     # $output_filter = {
     #    init => sub {
     #      my ($self)= @_;
@@ -1203,7 +1699,7 @@ sub claim_search_win {
     #      }
     #    }
     #
-
+    # GROUP:
     # >> for $1,substr($2,3,1),$3 give $1, sum(2*$1+$3), max($2+1)
     #
     # $output_filter = {
@@ -1273,75 +1769,15 @@ sub claim_search_win {
     #    }
     # }
     #
+    # AGGREGATE:
     # >> 1 + sum(2*$1+$3), max($2+1)
     #
     # this is basically equivalent to
     # >> for 1 return 1 + sum(2*$1+$3), max($2+1)
-    # but optimized:
+    # but optimized
     #
-    # $output_filter = {
-    #    init => sub {
-    #      my ($self)= @_;
-    #      $self->{aggregated}[0] = 0;     # init sum()
-    #      $self->{aggregated}[1] = undef; # init max()
-    #    }
-    #    process_row => sub {
-    #      my ($self,$row)= @_;
-    #      my $agg=0;
-    #      $_->($self,$agg++,$row) for @{$self->{aggregation}};
-    #    },
-    #    aggregation => [
-    #       # 0: sum(2*$1+$3)
-    #       sub {
-    #         my ($self, $i, $row)=@_;
-    #         my ($v1,$v3) = @$row[1,3];
-    #         $self->{aggregated}[$i] += ((2*$v1)+$v3) if defined($v1) and defined($v3);
-    #         return;
-    #       },
-    #       # 1: max($2+1)
-    #       sub {
-    #         my ($self, $i, $row)=@_;
-    #         my ($v2) = @$row[2];
-    #         my $max = $self->{aggregated}[$i];
-    #         $self->{aggregated}[$i] = $v2 if !defined($max) or (defined($v2) and $max<$v2+1);
-    #         return;
-    #       },
-    #    ]
-    #    finish => {
-    #      my $out = $_[0]->{output};
-    #      my ($a1,$a2) = @{$self->{aggregated}};
-    #      $out->{process_row}->($out, [
-    #        defined($a1) ? 1 + $a1 : undef,
-    #        defined($a2) ? $a2 : undef,
-    #      ])
-    #    }
-    # }
-    #
+    # PLAIN:
     #  >> distinct 1 + $3, $2
-    #
-    # $output_filter = {
-    #    init => sub {
-    #      my ($self)=@_;
-    #      $self->{seen} = {};
-    #    },
-    #    seen => undef,
-    #    process_row => sub {
-    #      my ($self,$row)= @_;
-    #      my ($v2,$v3) = @$row[2,3];
-    #      my $out = $self->{output};
-    #      my $o = [
-    #        defined($v3) ? (1 + $v3) : undef,
-    #        $v2,
-    #      ];
-    #      my $key = join "\x0",map { defined $_ ? $_ : '' } @$o;
-    #      unless (exists $self->{seen}{$k}) {
-    #        $self->{seen}{$k}=undef;
-    #        $out->{process_row}->($out,$out_row);
-    #      }
-    #    },
-    # }
-    #
-    #
     #
     #
   }
@@ -1349,8 +1785,14 @@ sub claim_search_win {
   sub serialize_column {
     my ($self,$column,$opts)=@_;
     $opts||={};
-    my $pt = Tree_Query::parse_column_expression($column); # $pt stands for parse tree
-    die "Invalid column expression '$column'" unless defined $pt;
+    my $pt;
+    if (ref($column)) {
+      $pt = $column;
+    } else {
+      # column is a PT:
+      $pt = Tree_Query::parse_column_expression($column); # $pt stands for parse tree
+      die "Invalid column expression '$column'" unless defined $pt;
+    }
     return $self->serialize_expression_pt($pt,{
       %$opts,
       output_filter => 1,
@@ -1799,33 +2241,63 @@ sub claim_search_win {
 	die "The analytic function ${name}() can only be used in an output filter expression!\n"
 	  unless $opts->{'output_filter'};
 	my ($args,$over,$sort) = @$pt;
-	if ($args) {
-	  if ($name eq 'concat') {
-	    die "The analytic function $name takes one or two arguments concat(STR, SEPARATOR?) in the output filter expression $opts->{expression}; got @$args!\n" if @$args==0 or @$args>2;
-	    if (@$args==2) {
-	      unless (defined($args->[1]) and !ref($args->[1]) and $args->[1]!~/^\$/) {
-		die "The second argument to concat(STR, SEPARATOR?) must be a literal string or number in $opts->{expression}!\n";
-	      }
+	$args||=[];
+	if ($name eq 'concat') {
+	  die "The analytic function $name takes one or two arguments concat(STR, SEPARATOR?) in the output filter expression $opts->{expression}; got @$args!\n" if @$args==0 or @$args>2;
+	  if (@$args==2) {
+	    unless (defined($args->[1]) and !ref($args->[1]) and $args->[1]!~/^\$/) {
+	      die "The second argument to concat(STR, SEPARATOR?) must be a literal string or number in $opts->{expression}!\n";
 	    }
-	  } elsif (@$args>1) {
-	    die "The analytic function $name takes at most one arguments in the output filter expression $opts->{expression}!\n";
 	  }
+	} elsif (@$args>1) {
+	  die "The analytic function $name takes at most one arguments in the output filter expression $opts->{expression}!\n";
+	} elsif (@$args==0) {
+	  $args=['$1'];
 	}
 	if ($over and @$over) {
 	  if ($opts->{local_aggregations}) {
-	    my $num = scalar keys %{$opts->{local_aggregations}};
-	    my @cols = map [map
-	      $self->serialize_expression_pt($_,{
-		%$opts,
-		local_aggregations => undef,
-	      }), @{$_||[]}], ($args,$over,$sort);
+	    #
+	    # we now compile the columns just to
+	    # determine a key
+	    # so that we can merge two aggregations into one
+	    # and to obtain variables used in individual clauses
+	    #
+	    my @vars;
+	    my $i = -1;
+	    my @cols = map {
+	      $i++;
+	      my $j = 0;
+	      [map {
+		my $ppt = Fslib::CloneValue($_);
+		 $self->serialize_expression_pt($ppt,{
+		   output_filter => 1,
+		   var_prefix => 'v',
+		   column_count => $opts->{column_count},
+		   columns_used => $opts->{columns_used},
+		   vars_used => ($vars[$i][$j++]={}),
+		   local_aggregations => undef,
+		 })} @{$_||[]}
+	      ],
+	    } ($args,$over,$sort);
 	    my $key = $name.':'.join(';',map join(',',@$_), @cols);
-	    $opts->{local_aggregations}{ $key } = [
-	      $num,
-	      $name,
-	      @cols,
-	    ];
-	    return '$l'.$num;
+	    my $num;
+	    if (exists $opts->{local_aggregations}{ $key }) {
+	      $num = $opts->{local_aggregations}{ $key }[0];
+	    } else {
+	      $num = scalar keys %{$opts->{local_aggregations}};
+	      $opts->{local_aggregations}{ $key } = [
+		$num,
+		$name,
+		$args,
+		$over,
+		$sort,
+		$cols[1], # over (local group cols)
+		$vars[1], # variables used in over
+	       ];
+	    }
+	    my $var = '$l'.$num;
+	    $opts->{vars_used}{$var}=1;
+	    return $var;
 	  } else {
 	    die "Cannot use analytic function $name with an 'over' clause in this context in the output filter expression $opts->{expression}!\n";
 	  }
@@ -1835,7 +2307,9 @@ sub claim_search_win {
 	  }
 	  my $num = scalar @{ $opts->{aggregations} };
 	  push @{ $opts->{aggregations} }, [$name,$args];
-	  return '$a'.$num;
+	  my $var = '$a'.$num;
+	  $opts->{vars_used}{$var}=1;
+	  return $var;
 	}
       } elsif ($type eq 'FUNC') {
 	my $name = $pt->[0];
