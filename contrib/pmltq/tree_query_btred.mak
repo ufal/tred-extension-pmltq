@@ -1438,7 +1438,6 @@ sub claim_search_win {
       return_exp => \@return_exp,
       return_agg => \%return_aggregations,
       group_by_exp => \@group_by_exp,
-      input_agg => \%input_aggregations,
       sort_by_exp => \@sort_by_exp,
       sort_agg => \%sort_aggregations,
     });
@@ -1545,7 +1544,7 @@ sub claim_search_win {
     my $code;
     if (@group_by) {
       # use group_by template
-      if (!keys(%input_aggregations) and !@local_filters) {
+      if (!@local_filters) {
 	$code = _code_from_template('GROUP', {
 	  _MAP_ => { RETURN => 1 },
 	  RETURN => 0,
