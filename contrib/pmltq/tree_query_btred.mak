@@ -807,7 +807,14 @@ sub claim_search_win {
       push @iterators, $iterator;
     }
     unless ($self->{parent_query}) {
-      my ($init_code,$first_filter) = $self->serialize_filters($query_tree->{'output-filters'});
+      my $first = first { $_->{'#name'} eq 'node' and $_->{name} } $query_tree->children;
+      my $output_opts = {
+	id => $first->{name},
+      };
+      my ($init_code,$first_filter) = $self->serialize_filters(
+	$query_tree->{'output-filters'},
+	$output_opts
+      );
       if ($init_code and $first_filter) {
 	print "INIT CODE:\n",$init_code,"\n";
 	$self->{filter} = eval $init_code; die $@ if $@;
@@ -946,7 +953,14 @@ sub claim_search_win {
     $opts ||= {};
     # first filter is special, it can refer to nodes
     my $prev;
-    my @filters = map $self->serialize_filter($_,$opts), @$filters;
+    my @filters;
+    {
+      my $i;
+      for my $f (@$filters) {
+	$opts->{filter_id} = "filter_".($i++);
+	push @filters, $self->serialize_filter($f,$opts);
+      }
+    }
     for my $filter (@filters) {
       if ($prev) {
 	$prev->{output}=$filter;
@@ -1078,7 +1092,7 @@ sub claim_search_win {
 	    finish => sub {
 	      my ($self)=@_;
               #<IF_LEN _RET_VARLIST_>
-	      my (_RET_VARLIST_) = @{$self->{key}}[_RET_COLNUMS_];
+	      my (_RET_VARLIST_) = @{$self->{group_columns}}[_RET_COLNUMS_];
               #</IF_LEN>
 	      _AGG_FINALIZE_
               #<IF_RETURN>
@@ -1113,6 +1127,7 @@ sub claim_search_win {
 	    my $new;
 	    my $group = $self->{group}{$key} ||= ($new = {
 	      key => $key,
+              group_columns => $g,
 	      %{$self->{grouping}}
 	     });
 	    $group->{init}->($group) if $new;
@@ -1227,7 +1242,7 @@ sub claim_search_win {
     use Data::Dumper;
     print Dumper($filter);
 
-    my $is_first_query = defined($opts->{column_count}) ? 0 : 1;
+    my $is_first_filter = defined($opts->{column_count}) ? 0 : 1;
     my $distinct = $filter->{distinct} || 0;
 
 
@@ -1243,20 +1258,6 @@ sub claim_search_win {
     my @foreach;
     my $foreach_idx = 0;
     my @input_columns;
-    my %input_aggregations;
-    my %group_columns;
-    my @group_vars;
-    my @group_by_exp = map { $self->serialize_column($_, {
-	%$opts,
-	var_prefix => 'g',
-	columns_used => \%group_columns,
-	foreach => ($is_first_query ? \@foreach : undef),
-	input_columns => ($is_first_query ? \@input_columns : undef),
-	vars_used => ($group_vars[$i++]={}),
-        local_aggregations => \%input_aggregations,
-	aggregations => undef, # not applicable
-        column_count => $opts->{column_count},
-      }) } @group_by;
 
     my @aggregations;
     my %return_aggregations;
@@ -1266,14 +1267,62 @@ sub claim_search_win {
     my @return_exp = map $self->serialize_column($_, {
 	%$opts,
 	var_prefix => 'v',
-	foreach => ($is_first_query && !@group_by ? \@foreach : undef),
-	input_columns => ($is_first_query && !@group_by ? \@input_columns : undef),
+	foreach => ($is_first_filter && !@group_by ? \@foreach : undef),
+	input_columns => ($is_first_filter && !@group_by ? \@input_columns : undef),
 	columns_used => \%return_columns,
 	vars_used => ($return_vars[$i++]={}),
         local_aggregations => \%return_aggregations,
 	aggregations => \@aggregations,
-        column_count => @group_by || $opts->{column_count}
+        column_count => @group_by || $opts->{column_count},
+	is_first_filter => $is_first_filter,
       }), @return;
+
+    if (keys(%return_aggregations) and @aggregations) {
+      # here we should split to two filters:
+      # filter one is
+      #
+      # >> [ for <group> ] 
+      #    [ give ] <cols_used>, <aggregations>
+      # >> <return_cols_remapping_cols_to_cols_used_and_aggregations_to_extra_cols>
+      #    [ sort by <sort_cols> ]
+      #
+
+      # for the first filter, we
+      # must use cols_used and we must obtain unparsed aggregations
+      # by preserving them from within local aggregations;
+      # the first parse of local aggregations content_decl
+      # can be used for this.
+      # we rerun serialize_filter using only group_by
+      # and the faked return
+
+      # then we clear group_by, preserve sort_by, andg
+      # we make sure that
+      # _RET_VARLIST_ is serialized as the usual _RET_VARLIST
+      # appended by aggregation variables
+      # and _RET_COLNUMS_ is serialized as 0..$#cols_used + $#aggregations
+
+
+      # and continue
+      # and gener
+
+      die "TODO";
+    }
+
+    my %group_columns;
+    my @group_vars;
+    my @group_by_exp = map { $self->serialize_column($_, {
+	%$opts,
+	var_prefix => 'g',
+	columns_used => \%group_columns,
+	foreach => ($is_first_filter ? \@foreach : undef),
+	input_columns => ($is_first_filter ? \@input_columns : undef),
+	vars_used => ($group_vars[$i++]={}),
+        local_aggregations => undef, # not applicable
+	aggregations => undef, # not applicable
+        column_count => $opts->{column_count},
+	is_first_filter => $is_first_filter,
+      }) } @group_by;
+
 
     my %sort_aggregations;
     my %sort_columns;
@@ -1281,44 +1330,15 @@ sub claim_search_win {
     my @sort_by_exp = map $self->serialize_column($_, {
 	%$opts,
 	var_prefix => 'v',
-	foreach => ($is_first_query && !@group_by ? \@foreach : undef),
-	input_columns => ($is_first_query  && !@group_by ? \@input_columns : undef),
+	foreach => ($is_first_filter && !@group_by ? \@foreach : undef),
+	input_columns => ($is_first_filter  && !@group_by ? \@input_columns : undef),
 	vars_used => ($sort_vars[$i++]={}),
         local_aggregations => \%sort_aggregations,
 	columns_used => \%sort_columns,
 	aggregations => undef, # not applicable
         column_count => scalar @return,
+	is_first_filter => $is_first_filter,
       }), @sort_by;
-
-
-    my @aggregations_exp;
-    my @aggregations_columns;
-    my @aggregations_vars;
-    if (@aggregations) {
-      my $i=-1;
-      @aggregations_exp = map {
-	my $j = 0;
-	$i++;
-	[$_->[0], #name
-	 [ # columns
-	   map $self->serialize_column($_, {
-	     %$opts,
-	     var_prefix => 'v',
-	     columns_used => ($aggregations_columns[$i]||={}),
-	     foreach => ($is_first_query ? \@foreach : undef),
-	     input_columns => ($is_first_query ? \@input_columns : undef),
-	     vars_used => ($aggregations_vars[$i][$j++]={}),
-	     local_aggregations => undef,
-	     aggregations => undef, # not applicable
-	     column_count => $opts->{column_count},
-	   }), @{$_->[1]}
-	 ]
-	]
-      } @aggregations;
-    }
-
-    $opts->{column_count} = scalar @return;
-    print "COLUMN_COUNT FOR NEXT FILTER: $opts->{column_count}\n";
 
     my @local_filters;
     my @local_group_keys;
@@ -1353,7 +1373,9 @@ sub claim_search_win {
 	    ),
 	  },
 	  {
-	    column_count => $opts->{column_count},
+	    is_first_filter => $is_first_filter,
+	    aggregations => \@aggregations,
+	    column_count => @group_by || $opts->{column_count},
 	    code_map_flags => {
 	      RETURN => 1,
 	      DISTINCT => 1,
@@ -1375,25 +1397,35 @@ sub claim_search_win {
 	@$over_exp > 1 ? 'join("\x0",'.$exp.')' : $exp;
     }
 
-#@local_filters = 
-#            {
-#              compile_filter('for $1 give sum($2)'),
-#              finish => {
-#                my %r;
-#                for my $key (keys %{$self->{group}}) {
-#                  my $group = $self->{group}{$key};
-#                  $r{$key} = $group->finish;
-#                  %$group=(); # immediatelly cleanup group data
-#                }
-#                return \%r;
-#              }
-#            }
-#            {
-#              compile_filter('for $2 give max($1)'),
-#              finish => # see above
-#            }
-#        ],
+    my @aggregations_exp;
+    my @aggregations_columns;
+    my @aggregations_vars;
+    if (@aggregations) {
+      my $i=-1;
+      @aggregations_exp = map {
+	my $j = 0;
+	$i++;
+	[$_->[0], #name
+	 [ # columns
+	   map $self->serialize_column($_, {
+	     %$opts,
+	     var_prefix => 'v',
+	     columns_used => ($aggregations_columns[$i]||={}),
+	     foreach => ($is_first_filter ? \@foreach : undef),
+	     input_columns => ($is_first_filter ? \@input_columns : undef),
+	     vars_used => ($aggregations_vars[$i][$j++]={}),
+	     local_aggregations => undef,
+	     aggregations => $opts->{aggregations}, # not applicable
+	     column_count => $opts->{column_count},
+	     is_first_filter => $is_first_filter,
+	   }), @{$_->[1]}
+	 ]
+	]
+      } @aggregations;
+    }
 
+    $opts->{column_count} = scalar @return;
+    print "COLUMN_COUNT FOR NEXT FILTER: $opts->{column_count}\n";
 
 
     # DEBUG:
@@ -1465,8 +1497,8 @@ sub claim_search_win {
 	  my $final_code = $aggregation_final{$funcname};
 	  my $arg1;
 	  if ($funcname eq 'concat') {
-	    $arg1 = $aggregations_exp[$i][1];
-	    $arg1 = defined($arg1) and length($arg1) ? $arg1 : q('');
+	    $arg1 = $aggr->[1][1];
+	    $arg1 = defined($arg1) && length($arg1) ? $arg1 : q('');
 	  }
 	  _code_substitute($final_code,
 			   {
@@ -1513,9 +1545,10 @@ sub claim_search_win {
     my $code;
     if (@group_by) {
       # use group_by template
-      if (!keys %input_aggregations and !keys(%return_aggregations)) {
+      if (!keys(%input_aggregations) and !@local_filters) {
 	$code = _code_from_template('GROUP', {
 	  _MAP_ => { RETURN => 1 },
+	  RETURN => 0,
 	  DISTINCT => $distinct,
 	  %{$opts->{code_map_flags}||{}},
 	});
@@ -1562,13 +1595,18 @@ sub claim_search_win {
 		       _LOCAL_GROUP_KEYS_ => $local_group_keys,
 		     }
 		    );
-      print "$code\n";
-      $output_filter = eval $code; die $@ if $@;
+
+    $code = "#line 1 ".$opts->{filter_id}."\n".$code;
+    {
+      my $i = 0;
+      printf("%3s\t%s",$i++,$_."\n") for split /\n/,$code;
+    }
+    $output_filter = eval $code; die $@ if $@;
 
 
 
     # filter_init:
-    if ($is_first_query) {
+    if ($is_first_filter) {
       my $code = q`
          $first_filter->{process_row}->($first_filter, [
            _RET_COLS_
@@ -2122,7 +2160,7 @@ sub claim_search_win {
 
   sub serialize_target {
     my ($self,$target,$opts)=@_;
-    if ($target eq $opts->{id}) {
+    if ($target eq $opts->{id} and !$opts->{output_filter}) {
       return '$node';
     }
     my $target_match_pos = $self->{name2match_pos}{$target};
@@ -2252,7 +2290,11 @@ sub claim_search_win {
 	} elsif (@$args>1) {
 	  die "The analytic function $name takes at most one arguments in the output filter expression $opts->{expression}!\n";
 	} elsif (@$args==0) {
-	  $args=['$1'];
+	  if ($opts->{column_count} and !$opts->{is_first_filter}) {
+	    $args=['$1'];
+	  } else {
+	    $args=['0'];
+	  }
 	}
 	if ($over and @$over) {
 	  if ($opts->{local_aggregations}) {
@@ -2272,8 +2314,11 @@ sub claim_search_win {
 		 $self->serialize_expression_pt($ppt,{
 		   output_filter => 1,
 		   var_prefix => 'v',
+		   expression => $opts->{expression},
 		   column_count => $opts->{column_count},
 		   columns_used => $opts->{columns_used},
+		   aggregations => $opts->{aggregations},
+		   is_first_filter => $opts->{is_first_filter},
 		   vars_used => ($vars[$i][$j++]={}),
 		   local_aggregations => undef,
 		 })} @{$_||[]}
@@ -2322,9 +2367,9 @@ sub claim_search_win {
 	  } elsif ($args and @$args) {
 	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: ${name}(\$node?)\n";
 	  } else {
-	    $node='$node';
+	    $node=$self->serialize_target($this_node_id,$opts);
 	  }
-	  return ($name eq 'descendants') ? qq{ scalar(${node}->descendants) }
+	  my $ret = ($name eq 'descendants') ? qq{ scalar(${node}->descendants) }
 	       : ($name eq 'lbrothers')   ? q[ do { my $n = ].$node.q[; my $i=0; $i++ while ($n=$n->lbrother); $i } ]
 	       : ($name eq 'rbrothers')   ? q[ do { my $n = ].$node.q[; my $i=0; $i++ while ($n=$n->rbrother); $i } ]
 	       : ($name eq 'depth_first_order') ? q[ do { my $n = ].$node.q[; my $r=$n->root; my $i=0; $i++ while ($n!=$r and $r=$r->following); $i } ]
@@ -2332,6 +2377,14 @@ sub claim_search_win {
     	       : ($name eq 'depth')       ? qq{ ${node}->level }
     	       : ($name eq 'name')       ? qq{ ${node}->{'#name'} }
 	       : die "Tree_Query internal error while compiling expression: should never get here!";
+
+	  if ($opts->{output_filter}) {
+	    die "Cannot use function '$name' at this point of an output filter: '$opts->{expression}'\n"
+	      if defined($opts->{column_count});
+	    return $self->serialize_column_node_ref($ret,$opts);
+	  } else {
+	    return $ret;
+	  }
 	} elsif ($name=~/^(?:lower|upper|length)$/) {
 	  if ($args and @$args==1) {
 	    my $func = $name eq 'lower' ? 'lc'
