@@ -1250,10 +1250,6 @@ sub claim_search_win {
     my $is_first_filter = defined($opts->{column_count}) ? 0 : 1;
     my $distinct = $filter->{distinct} || 0;
 
-
-
-
-
     my @foreach;
     my $foreach_idx = 0;
     my @input_columns;
@@ -1313,11 +1309,13 @@ sub claim_search_win {
 	    (map '$'.$_, sort keys(%return_columns)),
 	    # these we pass in parsed
 	    (map [ 'ANALYTIC_FUNC',
-		  $_->[1], # name
-		  $_->[2], # args
-		 ], @aggregations),
+		   $_->[1], # name
+		   Fslib::CloneValue($_->[2]), # args
+		  ], @aggregations),
 	   ),
 	},$opts);
+
+      $is_first_filter=0;
 
       print "========================\n";
       print "PART TWO:\n";
@@ -1480,7 +1478,6 @@ sub claim_search_win {
 
     use Data::Dumper;
     print Dumper({
-      filter => $filter,
       foreach => \@foreach,
       aggregations => \@aggregations_exp,
       return_exp => \@return_exp,
@@ -2441,7 +2438,7 @@ sub claim_search_win {
 	      keys(%{$opts->{aggregations}});
 	    print "NUM: $num (new)\n";
 	    print map "K: $_\n", keys %{$opts->{aggregations}};
-	    $opts->{aggregations}{ $key } = [ $num, $name, $args ];
+	    $opts->{aggregations}{ $key } = [ $num, $name, Fslib::CloneValue($args) ];
 	  }
 	  $var ||= '$a'.$num;
 	  $opts->{vars_used}{$var}=1;
