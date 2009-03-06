@@ -1,6 +1,7 @@
 # -*- cperl -*-
 {
 package Tree_Query_Btred;
+
 use strict;
 
 BEGIN {
@@ -504,7 +505,7 @@ sub map_nodes_to_query_pos {
   my @nodes = ($tree,$tree->descendants);
   my $r = $self->{current_result};
   return {
-    map { $_->[1]=~/^\Q$fn\E\.(\d+)$/ ? ($nodes[$1] => $_->[0]) : () } 
+    map { $_->[1]=~/^\Q$fn\E\.([0-9]+)$/ ? ($nodes[$1] => $_->[0]) : () } 
       reverse # upper nodes first (optional nodes do not overwrite their parents)
       map { [$_,$r->[$_]] } 0..$#$r
   };
@@ -526,7 +527,7 @@ sub select_matching_node {
     my $fsfile = $win->{FSFile};
     next unless $fsfile;
     my $fn = $fsfile->filename.'##'.($win->{treeNo}+1);
-    next unless $result =~ /\Q$fn\E\.(\d+)$/;
+    next unless $result =~ /\Q$fn\E\.([0-9]+)$/;
     my $pos = $1;
     my $r=$fsfile->tree($win->{treeNo});
     for (1..$pos) {
@@ -584,6 +585,28 @@ sub claim_search_win {
   use List::Util qw(first);
   import TredMacro qw(SeqV uniq);
   use PMLSchema;
+  use POSIX qw(ceil floor);
+  use constant {
+    COL_UNKNOWN => 0,
+    COL_STRING  => 1,
+    COL_NUMERIC => 2,
+  };
+
+  sub round {
+    my ($num, $digits)=@_;
+    $digits = int $digits;
+    return sprintf("%.${digits}f", $num);
+  }
+  sub trunc {
+    my ($self, $num, $digits) = @_;
+    $digits = int $digits;
+    my $decimalscale = 10**abs($digits);
+    if ($digits >= 0) {
+      return int($num * $decimalscale) / $decimalscale;
+    } else {
+      return int($num / $decimalscale) * $decimalscale;
+    }
+  }
 
   my %test_relation = (
     'parent' => q($start->parent == $end),
@@ -624,6 +647,7 @@ sub claim_search_win {
     my @sub_queries;
     my $parent_query=$opts->{parent_query};
     my $matched_nodes = $parent_query ? $parent_query->{matched_nodes} : [];
+    my $all_iterators = $parent_query ? $parent_query->{all_iterators} : [];
     my %have;
     my $query_pos;
     #######################
@@ -650,6 +674,7 @@ sub claim_search_win {
       parent_query_match_pos => $opts->{parent_query_match_pos},
 
       matched_nodes => $matched_nodes, # nodes matched so far (incl. nodes in subqueries; used for evaluation of cross-query relations)
+      all_iterators => $all_iterators, # nodes matched so far (incl. nodes in subqueries; used for evaluation of cross-query relations)
 
       type_mapper => $opts->{type_mapper},
 
@@ -805,6 +830,7 @@ sub claim_search_win {
 	$iterator = $self->create_iterator($qn,$conditions);
       }
       push @iterators, $iterator;
+      $all_iterators->[$self->{pos2match_pos}[$i]]=$iterator;
     }
     unless ($self->{parent_query}) {
       my $first = first { $_->{'#name'} eq 'node' and $_->{name} } $query_tree->children;
@@ -816,7 +842,7 @@ sub claim_search_win {
 	$output_opts
       );
       if ($init_code and $first_filter) {
-	print "INIT CODE:\n",$init_code,"\n";
+	print STDERR "INIT CODE:\n",$init_code,"\n" if $DEBUG>2;
 	$self->{filter} = eval $init_code; die $@ if $@;
 	$self->{first_filter} = $first_filter;
       }
@@ -851,7 +877,7 @@ sub claim_search_win {
   sub init_filters {
     my $self = shift;
     if ($self->{first_filter}) {
-      return $self->{first_filter}->{init}($self->{first_filter});
+      return $self->{first_filter}->{init}->($self->{first_filter});
     }
     return;
   }
@@ -1034,13 +1060,14 @@ sub claim_search_win {
   my %code_template = (
     PLAIN => q`
       	{
+          type => 'PLAIN',
       	  init => sub {
-	    #<IF_DISTINCT>
       	    my ($self)=@_;
+	    #<IF_DISTINCT>
       	    $self->{seen} = {};
-            my $out = $self->{output};
-	    $out->{init}($out);
 	    #</IF_DISTINCT>
+            my $out = $self->{output};
+	    $out->{init}->($out);
       	  },
       	  process_row => sub {
       	    my ($self,$row)= @_;
@@ -1074,8 +1101,13 @@ sub claim_search_win {
     # Example: >> $1, $2, 2+sum($2 over $1)*max($1 over $2)
     AGGREGATE => q`
           {
+            type => 'AGGREGATE',
 	    init => sub {
 	      my ($self)= @_;
+              #<IF_NOT_RETURN>
+              my $out = $self->{output};
+	      $out->{init}->($out);
+              #</IF_NOT_RETURN>
 	      _INIT_AGG_
 	    },
 	    process_row => sub {
@@ -1102,12 +1134,14 @@ sub claim_search_win {
               $out->{process_row}->($out, [
                 _RET_COLS_
               ]);
+	      $out->{finish}($out);
               #</IF_NOT_RETURN>
 	     }
 	   }`,
 
     GROUP => q`
         {
+          type => 'GROUP',
 	  init => sub {
 	    my ($self)= @_;
 	    $self->{group} = {};
@@ -1134,8 +1168,8 @@ sub claim_search_win {
 	  finish => sub  {
             my ($self)=@_;
             #<IF_NOT_RETURN>
-	    my $out = $_[0]->{output};
-            $out->{init}($out);
+	    my $out = $self->{output};
+            $out->{init}->($out);
             #</IF_NOT_RETURN>
 	    #<IF_DISTINCT>
             my %seen;
@@ -1164,10 +1198,16 @@ sub claim_search_win {
     # Example: >> $1, $2, 2+sum($2 over $1)*max($1 over $2)
   INNER_AGGREGATE =>  q`
      {
+       type => 'INNNER_AGGREGATE',
        init => sub {
          my ($self)= @_;
-         $self->{init}->($_) for @{$self->{local_group}};
+         $_->{init}->($_) for @{$self->{local_group}};
          $self->{saved_rows} = [];
+
+         #<IF_NOT_RETURN>
+         my $out = $self->{output};
+	 $out->{init}->($out);
+         #</IF_NOT_RETURN>
        },
        local_group => \@local_filters,
        process_row => sub {
@@ -1193,6 +1233,39 @@ sub claim_search_win {
 	     _RET_COLS_
 	   ]);
          }
+	 $out->{finish}($out);
+       }
+     }`,
+  SORT =>  q`
+     {
+       type => 'SORT',
+       init => sub {
+         my ($self)= @_;
+         $self->{saved_rows} = [];
+         my $out = $self->{output};
+	 $out->{init}->($out);
+       },
+       process_row => sub {
+         my ($self,$row)= @_;
+         #<IF_LEN _SORT_VARLIST_>
+	 my (_SORT_VARLIST_) = @$row[_SORT_COLNUMS_];
+         #</IF_LEN>
+         push @{$self->{saved_rows}}, [$row, [
+	   _SORT_COLS_
+	 ]];
+       },
+       finish => sub {
+         my ($self)=@_;
+         my $saved_rows = $self->{saved_rows};
+         @$saved_rows = sort {
+           _SORT_CMP_
+         } @$saved_rows;
+         my $row;
+         my $out = $self->{output};
+         while ($row = shift @$saved_rows) {
+           $out->{process_row}->($out, $row->[0]);
+         }
+	 $out->{finish}($out);
        }
      }`,
   );
@@ -1208,9 +1281,9 @@ sub claim_search_win {
   }
   
   sub _code_template_substitute {
-    my (undef, $map)=@_;
+    my (undef, $map,$id)=@_;
     $_[0] =~ s{\b_TEMPLATE_([A-Z_]+)_\b}{
-      _code_from_template($1, $map->{_MAP_})
+      _code_from_template($1, $map->{_MAP_},'sub_'.$id)
     }eg;
     if ($map) {
       my $what = join('|',reverse sort keys %$map);
@@ -1221,11 +1294,11 @@ sub claim_search_win {
   }
 
   sub _code_from_template {
-    my ($name,$map)=@_;
+    my ($name,$map,$id)=@_;
     $map ||= {};
     my $code = $code_template{$name};
-    _code_template_substitute($code, $map);
-    return $code;
+    _code_template_substitute($code, $map,$id);
+    return "\n#line 1 ${name}_${id}\n".$code;
   }
 
   sub serialize_filter {
@@ -1240,12 +1313,11 @@ sub claim_search_win {
     my @return = @{ $filter->{return} || [] };
     my @sort_by = @{ $filter->{'sort-by'} || [] };
 
-    print "----------------\n";
-    print "Serializing: g: @group_by, r: @return, s: @sort_by\n";
-    print "Column count: $opts->{column_count}\n";
-
-    use Data::Dumper;
-    print Dumper([$filter,$opts]);
+    if ($DEBUG>2) {
+      print STDERR "----------------\n";
+      print STDERR "Serializing: g: @group_by, r: @return, s: @sort_by\n";
+      print STDERR "Column count: $opts->{column_count}\n";
+    }
 
     my $is_first_filter = defined($opts->{column_count}) ? 0 : 1;
     my $distinct = $filter->{distinct} || 0;
@@ -1276,10 +1348,13 @@ sub claim_search_win {
       }), @return
     };
 
+
     my @compiled_filters;
-
-
     my %old_aggregations;
+
+    my $prev_types = @group_by
+      ? [map $self->compute_column_data_type($_,$opts), @group_by]
+      : $opts->{column_types};
 
     if (keys(%return_aggregations) and keys(%aggregations)) {
       # here we should split to two filters:
@@ -1299,26 +1374,38 @@ sub claim_search_win {
 
       my @aggregations = sort { $a->[0] <=> $a->[1] } values %aggregations;
 
-      print "========================\n";
-      print "PART ONE:\n";
+      if ($DEBUG>2) {
+	print STDERR "========================\n";
+	print STDERR "PART ONE:\n";
+      }
 
-      push @compiled_filters,
-	$self->serialize_filter({
-	  'group-by' => $filter->{'group-by'},
-	  'return' => Fslib::List->new(
-	    (map '$'.$_, sort keys(%return_columns)),
-	    # these we pass in parsed
-	    (map [ 'ANALYTIC_FUNC',
-		   $_->[1], # name
-		   Fslib::CloneValue($_->[2]), # args
-		  ], @aggregations),
-	   ),
-	},$opts);
+      my $agg_filter = {
+	'group-by' => $filter->{'group-by'},
+	'return' => Fslib::List->new(
+	  (map '$'.$_, sort keys(%return_columns)),
+	  # these we pass in parsed
+	  (map [ 'ANALYTIC_FUNC',
+		 $_->[1], # name
+		 Fslib::CloneValue($_->[2]), # args
+		], @aggregations),
+	 ),
+      };
+      push @compiled_filters, $self->serialize_filter($agg_filter,$opts);
+
+      $prev_types = [
+	map $self->compute_column_data_type($_,{
+	  %$opts,
+	  column_types => $prev_types,
+	}), @{$agg_filter->{return}}
+       ];
+
 
       $is_first_filter=0;
 
-      print "========================\n";
-      print "PART TWO:\n";
+      if ($DEBUG > 2) {
+	print STDERR "========================\n",
+	             "PART TWO:\n";
+      }
 
       # the second filter is obtained as follows:
 
@@ -1332,15 +1419,20 @@ sub claim_search_win {
       %old_aggregations = %aggregations;
       %aggregations = ();
 
-      print Data::Dumper::Dumper( \%old_aggregations );
-
-
+      print STDERR Data::Dumper::Dumper( \%old_aggregations ) if $DEBUG > 2;
 
       # we make sure that
       # _RET_VARLIST_ is serialized as the usual _RET_VARLIST_
       # appended by aggregation variables
       # and _RET_COLNUMS_ is serialized as 0..$#cols_used + @aggregations
     }
+
+    $opts->{column_types} = [
+      map $self->compute_column_data_type($_,{
+	%$opts,
+	column_types => $prev_types,
+      }), @return
+    ];
 
     my %group_columns;
     my @group_vars;
@@ -1372,7 +1464,7 @@ sub claim_search_win {
 	foreach => ($is_first_filter && !@group_by ? \@foreach : undef),
 	input_columns => ($is_first_filter  && !@group_by ? \@input_columns : undef),
 	vars_used => ($sort_vars[$i++]={}),
-        local_aggregations => \%sort_aggregations,
+#        local_aggregations => \%sort_aggregations,
 	columns_used => \%sort_columns,
 	aggregations => undef, # not applicable
         column_count => scalar @return,
@@ -1389,17 +1481,19 @@ sub claim_search_win {
       # but contains parse-trees instead of strings
       my $column_count = (@group_by || $opts->{column_count});
 
-      print "SUBFILTER\n";
-      use Data::Dumper;
-      print Dumper({
-	name => $name,
-	args => $args,
-	over => $over,
-	over_exp => $over_exp,
-	vars_used => $vars_used,
-	column_count => $column_count,
-       });
-      my ($inner_group_filter) =
+      if ($DEBUG>2) {
+	print STDERR "SUBFILTER\n";
+	use Data::Dumper;
+	print STDERR Dumper({
+	  name => $name,
+	  args => $args,
+	  over => $over,
+	  over_exp => $over_exp,
+	  vars_used => $vars_used,
+	  column_count => $column_count,
+	});
+      }
+      my @f =
 	$self->serialize_filter(
 	  {
 	    'group-by' => Fslib::List->new(
@@ -1416,6 +1510,8 @@ sub claim_search_win {
 	    ),
 	  },
 	  {
+	    column_types => $opts->{column_types},
+	    filter_id => $opts->{filter_id}.'_local_'.$num,
 	    is_first_filter => $is_first_filter,
 	    old_aggregations => \%old_aggregations,
 	    old_aggregations_first_column => scalar(keys(%return_columns)),
@@ -1425,8 +1521,11 @@ sub claim_search_win {
 	      DISTINCT => 1,
 	    },
 	  }
-	);
-      $local_filters[$num] = $inner_group_filter;
+	 );
+      if (@f>1) {
+	die "Internal error: serialize_filter on a local filter returned more than one filter:\n @f!";
+      }
+      $local_filters[$num] = $f[0];
       my $exp = do {
 	my $i = 0;
 	join(",\n            ",
@@ -1471,26 +1570,24 @@ sub claim_search_win {
     }
 
     $opts->{column_count} = scalar @return;
-    print "COLUMN_COUNT FOR NEXT FILTER: $opts->{column_count}\n";
 
-
-    # DEBUG:
-
-    use Data::Dumper;
-    print Dumper({
-      foreach => \@foreach,
-      aggregations => \@aggregations_exp,
-      return_exp => \@return_exp,
-      return_agg => \%return_aggregations,
-      group_by_exp => \@group_by_exp,
-      sort_by_exp => \@sort_by_exp,
-      sort_agg => \%sort_aggregations,
-    });
-
+    if ($DEBUG>2) {
+      use Data::Dumper;
+      print STDERR Dumper({
+	foreach => \@foreach,
+	aggregations => \@aggregations_exp,
+	return_exp => \@return_exp,
+	return_agg => \%return_aggregations,
+	group_by_exp => \@group_by_exp,
+	sort_by_exp => \@sort_by_exp,
+	sort_agg => \%sort_aggregations,
+      });
+    }
 
     my @columns_used = uniq(sort keys(%return_columns));
     my @g_columns_used = uniq(sort keys(%group_columns));
-
+    my @sort_columns_used = uniq(sort keys(%sort_columns));
+    
     # In case we moved aggregations to a separate filter
     # that precedes this one, we want
     # _RET_VARLIST_ to be serialized as the usual _RET_VARLIST
@@ -1575,35 +1672,15 @@ sub claim_search_win {
       }
     }
 
-    my $cols = do {
-      my $i = 0;
-      join (",\n	      ",
-	    map {
-	      my @vars_used = sort keys %{$return_vars[$i++]};
-	      if (@vars_used and !/^\$[a-z][0-9]+$/) {
-		'(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
-	      } else {
-		$_
-	      }
-	    } @return_exp)
-    };
-    my $group_cols = do {
-      my $i = 0;
-      join (",\n	      ",
-	    map {
-	      my @vars_used = sort keys %{$group_vars[$i++]};
-	      if (@vars_used and !/^\$[a-z][0-9]+$/) {
-		'(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
-	      } else {
-		$_
-	      }
-	    } @group_by_exp)
-    };
+    my $cols = $self->serialize_col_expressions(\@return_exp, \@return_vars);
+    my $group_cols = $self->serialize_col_expressions(\@group_by_exp, \@group_vars);
     my $local_group_keys = join (",\n	      ",@local_group_keys);
 
     my $output_filter;
     # first without any inner aggregations
     my $code;
+    my $filter_id = $opts->{filter_id};
+
     if (@group_by) {
       # use group_by template
       if (!@local_filters) {
@@ -1612,7 +1689,7 @@ sub claim_search_win {
 	  RETURN => 0,
 	  DISTINCT => $distinct,
 	  %{$opts->{code_map_flags}||{}},
-	});
+	},$opts->{filter_id});
       } else {
 	die "TODO";
       }
@@ -1622,13 +1699,13 @@ sub claim_search_win {
 	RETURN => 0,
 	DISTINCT => $distinct,
 	%{$opts->{code_map_flags}||{}},
-      });
+      },$opts->{filter_id});
     } elsif (!@aggregations_exp and keys(%return_aggregations)) {
       $code = _code_from_template('INNER_AGGREGATE', {
 	RETURN => 0,
 	DISTINCT => $distinct,
 	%{$opts->{code_map_flags}||{}},
-      });
+      },$opts->{filter_id});
     } elsif (@aggregations_exp and keys(%return_aggregations)) {
       die "TODO";
     } else {
@@ -1637,7 +1714,7 @@ sub claim_search_win {
 	RETURN => 0,
 	DISTINCT => $distinct,
 	%{$opts->{code_map_flags}||{}},
-      });
+      },$opts->{filter_id});
     }
 
     # below, user-data may be involved, we must do a one step-substitution
@@ -1656,14 +1733,12 @@ sub claim_search_win {
 		       _LOCAL_GROUP_KEYS_ => $local_group_keys,
 		     }
 		    );
-
-    $code = "#line 1 ".$opts->{filter_id}."\n".$code;
-    {
-      my $i = 0;
-      printf("%3s\t%s",$i++,$_."\n") for split /\n/,$code;
+    if ($DEBUG>2) {
+      my $i = -1;
+      print STDERR sprintf("%3s\t%s",$i++,$_."\n") for split /\n/,$code;
     }
     $output_filter = eval $code; die $@ if $@;
-
+    $output_filter->{code}=$code;
 
 
     # filter_init:
@@ -1711,175 +1786,182 @@ sub claim_search_win {
 			)
 		      );
       }
-      print "$code\n";
+      print STDERR "$code\n" if $DEBUG>2;
       $opts->{filter_init} = $code;
     }
-    
     push @compiled_filters, $output_filter;
-    return  @compiled_filters;
 
-    # >> $1, 1 + sum(2*$1+$3), max($2+1)
-    # or
-    # >> $1, count()
-    # ERROR (mixing aggregation and non-aggregation)
-    #
-    #
-    # TODO:
-    # 1) combination of for ... give and ...(... over ...)
-    #
-    #  >> for $a.functor, $b.functor give
-    #    $1,$2, ratio(count() over $1)
-    #
-    # is same as
-    #
-    #  >> for $a.functor, $b.functor give
-    #    $1 & $2, count() div sum(count() over $1)
-    #
-    # and can be rewritten as:
-    #
-    #   >> for $a.functor, $b.functor give
-    #     $1,$2,count()
-    #   >> $1 & $2, ($3 div sum($3 over $1))
-    #
-    # 2) sort
-    # 3) distinct
-    #
-    # >> $1, $2, 2+sum($2 over $1)*max($1 over $2)
-    # INNER_AGGREGATE:
-    # $output_filter = {
-    #    init => sub {
-    #      my ($self)= @_;
-    #      $_->{init}->($_) for @{$self->{local_group}};
-    #      $_->{saved_rows} = [];
-    #    },
-    #    local_group => [
-    #        {
-    #          compile_filter('for $1 give sum($2)'),
-    #          finish => {
-    #            my %r;
-    #            for my $key (keys %{$self->{group}}) {
-    #              my $group = $self->{group}{$key};
-    #              $r{$key} = $group->finish;
-    #              %$group=(); # immediatelly cleanup group data
-    #            }
-    #            return \%r;
-    #          }
-    #        }
-    #        {
-    #          compile_filter('for $2 give max($1)'),
-    #          finish => # see above
-    #        }
-    #    ],
-    #    saved_rows => [],
-    #    process_row => sub {
-    #      my ($self,$row)= @_;
-    #      my ($v1,$v2) = @$row[0,1];
-    #      push @{$self->{saved_rows}}, [$v1,$v2]; # only save the columns we need
-    #
-    #      my $group1 = $self->{local_group}[0]; # for $1 give sum($2)
-    #      $group1->process_row($group1, $row);
-    #      
-    #      my $group2 = $self->{local_group}[1]; # for $2 give max($1)
-    #      $group2->process_row($group2, $row);
-    #    }
-    #    finish => sub {
-    #      my ($self)=@_;
-    #      my $saved_rows = $self->{saved_rows};
-    #      my $saved;
-    #      my $output = $self->{output};
-    #      my @local_group_results = map $_->finish, @{$self->{local_group}};
-    #      while ($saved = shift @$saved_rows) {
-    #        my ($v1,$v2) = @$saved; # recover saved columns
-    #        my $key1 = $1;
-    #        my $key2 = $2;
-    #        my $l1 = $local_group_results[0]{ $key1 };
-    #        my $l2 = $local_group_results[1]{ $key2 };
-    #        $output->process_row($output, [ $v1, $v2, 
-    #                                        defined($l1) && defined($l2) ? 2+$l1*$l2 : undef ]);
-    #      }
-    #    }
-    #
-    # GROUP:
-    # >> for $1,substr($2,3,1),$3 give $1, sum(2*$1+$3), max($2+1)
-    #
-    # $output_filter = {
-    #    init => sub {
-    #      my ($self)= @_;
-    #      $self->{group} = {};
-    #    }
-    #    process_row => sub {
-    #      my ($self,$row)= @_;
-    #      my ($v1,$v2,$v3) = @$row[0,1,2];
-    #      my $g = [$v1, defined($v2) ? substr($v2,3,1) : undef, $v3];
-    #      my $key = join "\x0",map { defined $_ ? $_ : '' } @$g;
-    #      my $new;
-    #      my $group = $self->{group}{$key} ||= ($new = {
-    #        key => $g,
-    #        %{$self->{grouping}}
-    #      });
-    #      $group->init() if $new;
-    #      $group->process_row($group,$row);
-    #    },
-    #    grouping => {
-    #      init => sub {
-    #        my ($self)= @_;
-    #        $self->{aggregated}[0] = 0;     # init sum()
-    #        $self->{aggregated}[1] = undef; # init max()
-    #      },
-    #      process_row => sub {
-    #        my ($self,$row)= @_;
-    #        my $agg=0;
-    #        $_->($self,$agg++,$row) for @{$self->{aggregation}};
-    #      },
-    #      aggregation => [
-    #      # 0: sum(2*$1+$3)
-    #        sub {
-    #          my ($self, $i, $row)=@_;
-    #          my ($v1,$v3) = @$row[0,2];
-    #          $self->{aggregated}[$i] += ((2*$v1)+$v3) if defined($v1) and defined($v3);
-    #          return;
-    #        },
-    #      # 1: max($2+1)
-    #        sub {
-    #          my ($self, $i, $row)=@_;
-    #          my ($v2) = @$row[1];
-    #          my $max = $self->{aggregated}[$i];
-    #          $self->{aggregated}[$i] = $v2 if !defined($max) or (defined($v2) and $max<$v2+1);
-    #          return;
-    #        },
-    #      ]
-    #      finish => {
-    #        my ($self)=@_;
-    #        my ($v1) = @{$self->{key}}[0];
-    #        my ($a1,$a2) = @{$self->{aggregated}};
-    #        return $self->{result} = [
-    #          $v1,
-    #          defined($a1) ? 1 + $a1 : undef,
-    #          defined($a2) ? $a2 : undef,
-    #        ];
-    #      }
-    #    }
-    #    finish => {
-    #      my $out = $_[0]->{output};
-    #      for my $group (values %{$self->{group}}) {
-    #        my $r = $group->finish;
-    #        %$group=(); # immediatelly cleanup group data
-    #        $out->{process_row}($out,$r);
-    #      }
-    #    }
-    # }
-    #
-    # AGGREGATE:
-    # >> 1 + sum(2*$1+$3), max($2+1)
-    #
-    # this is basically equivalent to
-    # >> for 1 return 1 + sum(2*$1+$3), max($2+1)
-    # but optimized
-    #
-    # PLAIN:
-    #  >> distinct 1 + $3, $2
-    #
-    #
+    if (@sort_by_exp) {
+      my $sort_code = _code_from_template('SORT', {
+	RETURN => 0,
+	DISTINCT => 0,
+      },'sort_'.$opts->{filter_id});
+      my $sort_varlist = join(',', map '$v'.$_, @sort_columns_used);
+      my $sort_colnums = join(',', map $_-1, @sort_columns_used);
+      my $sort_cols = $self->serialize_col_expressions(\@sort_by_exp, \@sort_vars);
+      print STDERR map {
+	"$_ => ".$self->compute_column_data_type($_,$opts)."\n"
+      } @sort_by;
+      my @op = map {
+	$self->compute_column_data_type($_,$opts)==COL_NUMERIC ?
+	  '<=>' : 'cmp'
+      } @sort_by;
+      my $sort_cmp = join(' or ',
+			  map '( $a->[1]['.$_.'] '.$op[$_].' $b->[1]['.$_.'])',
+			  0..$#sort_by_exp);
+      _code_substitute($sort_code,
+		       {
+			 _SORT_VARLIST_ => $sort_varlist,
+			 _SORT_COLNUMS_ => $sort_colnums,
+			 _SORT_COLS_ => $sort_cols,
+			 _SORT_CMP_ => $sort_cmp,
+		       }
+		      );
+      if ($DEBUG>2) {
+	my $i = -1;
+	print STDERR sprintf("%3s\t%s",$i++,$_."\n") for split /\n/,$sort_code;
+      }
+      $output_filter = eval $sort_code; die $@ if $@;
+      $output_filter->{code}=$sort_code;
+      push @compiled_filters, $output_filter;
+    }
+    return  @compiled_filters;
+  }
+
+  sub serialize_col_expressions {
+    my ($self, $expressions, $vars)=@_;
+    my $i = 0;
+    return
+      join (",\n	      ",
+	    map {
+	      my @vars_used = sort keys %{$vars->[$i++]};
+	      if (@vars_used and !/^\$[a-z][0-9]+$/) {
+		'(('.join(' && ',map qq{defined($_)}, @vars_used).') ? ('.$_.') : undef)'
+	      } else {
+		$_
+	      }
+	    } @$expressions);
+  }
+
+  # returns:
+  #  COL_NUMERIC for numeric type
+  #  COL_STRING for string type
+  #  COL_UNKNOWN for any other type
+  sub compute_column_data_type {
+    my ($self,$column,$opts)=@_;
+    $opts||={};
+    my $pt;
+    if (ref($column)) {
+      $pt = $column;
+    } else {
+      # column is a PT:
+      $pt = Tree_Query::parse_column_expression($column); # $pt stands for parse tree
+      die "Invalid column expression '$column'" unless defined $pt;
+    }
+    $self->compute_column_data_type_pt($pt,$opts);
+  }
+
+  sub compute_column_data_type_pt {
+    my ($self,$pt,$opts)=@_;
+    if (ref $pt) {
+      my ($type) = @$pt;
+      if ($type eq 'EVERY') {
+	return $self->compute_column_data_type_pt($pt->[1],$opts);
+      } elsif ($type eq 'ATTR' or $type eq 'REF_ATTR') {
+	my $node_type;
+	if ($type eq 'REF_ATTR') {
+	  my $target = lc($pt->[1]);
+	  $pt=$pt->[2];
+	  $node_type = $self->{name2type}{$target};
+	} else {
+	  $node_type = $opts->{type};
+	}
+	my $attr=join('/',@{$pt}[1..$#$pt]);
+	$attr=~s{\[\]}{#content}g;
+	$attr=~s{/\[[^\]]*\]}{}g;
+	my $node_type_decl = $self->{type_mapper}->get_decl_for($node_type);
+	my $decl = $node_type_decl->find($attr);
+	my $decl_is = $decl->get_decl_type;
+	while ($decl and
+		 ($decl_is == PML_LIST_DECL or
+		    $decl_is == PML_ALT_DECL or
+		      $decl_is == PML_MEMBER_DECL or
+			$decl_is == PML_ELEMENT_DECL)) {
+	  $decl  = $decl->get_content_decl;
+	  $decl_is = $decl->get_decl_type;
+	}
+	if ($decl and $decl->is_atomic) {
+	  if ($decl_is == PML_CHOICE_DECL or
+		$decl_is == PML_CONSTANT_DECL) {
+	    my @values = $decl->get_values;
+	    if (@values and !grep { !/^(?:0|-?[^1-9][0-9]*(?:\.[0-9]*[1-9]))$/ } @values) {
+	      return COL_NUMERIC;
+	    } else {
+	      return COL_STRING;
+	    }
+	  } else {
+	    my $format = $decl->get_format;
+	    if ($format =~ /(integer$|int$|short$|byte|long|decimal$|float$|double$)/i) {
+	      return COL_NUMERIC;
+	    } else {
+	      return COL_STRING;
+	    }
+	  }
+	} else {
+	  return COL_UNKNOWN;
+	}
+      } elsif ($type eq 'ANALYTIC_FUNC') {
+	if ($pt->[1] eq 'concat') {
+	  return COL_STRING;
+	} else {
+	  return COL_NUMERIC;
+	}
+      } elsif ($type eq 'FUNC') {
+	my $name = $pt->[1];
+	if ($name=~/^(?:descendants|lbrothers|rbrothers|sons|depth|length|abs|floor|ceil|round|trunc|percnt)$/) {
+	  return COL_NUMERIC;
+	} else {
+	  return COL_STRING;
+	}
+      } elsif ($type eq 'EXP') {
+	my @exp = @$pt;
+	shift @exp;		# shift EXP
+	return $self->compute_column_data_type_pt($exp[0],$opts) if @exp==1;
+	my $lowest_precedence;
+	my $last_lowest_precedence_op;
+	while (@exp) {
+	  shift @exp;		# shift an operand
+	  if (@exp) {
+	    my $op = shift @exp;
+	    my $precedence =$Tree_Query::Common::operator_precedence{$op};
+	    if (!defined($lowest_precedence) or $precedence<=$lowest_precedence) {
+	      $last_lowest_precedence_op = $op;
+	      $lowest_precedence = $precedence;
+	    }
+	  }
+	}
+	if ($last_lowest_precedence_op eq '&') {
+	  return COL_STRING;
+	} else {
+	  return COL_NUMERIC;
+	}
+      }
+    } else {
+      if ($pt=~/^[-0-9]/) {  # literal number
+	return COL_NUMERIC;
+      } elsif ($pt=~/^'/) {  # literal string
+	return COL_STRING;
+      } elsif ($pt=~/^\$/) {
+	my $var = $pt; $var=~s/^\$//;
+	if ($var =~ /^[1-9][0-9]*$/) {
+	  return $opts->{column_types}[$var - 1];
+	} else {
+	  return COL_UNKNOWN;
+	}
+      } else {
+	die "Unrecognized sub-expression: $pt\n";
+      }
+    }
   }
 
   sub serialize_column {
@@ -1949,7 +2031,7 @@ sub claim_search_win {
       .(defined($optional) ? $optional.'==$node or ' : '')
       .'!exists($have{$node}))';
     my $type_name = quotemeta($qnode->{'node-type'});
-    my $sub = qq(#line 0 "query-node/${match_pos}"\n)
+    my $sub = qq(#line 1 "query-node/${match_pos}"\n)
       . 'sub { my ($node,$fsfile,$backref)=@_; '."\n  "
        .$nodetest
        .(defined($type_name) && length($type_name) ? "\n and ".q[$node->type->get_decl_path =~ m{^\!].$type_name.q[(?:\.type)$}] : ())
@@ -1981,7 +2063,7 @@ sub claim_search_win {
       my $operator = $node->{operator};
       my $negate = $operator=~s/^!// ? 1 : 0;
       if ($operator eq '=') {
-	if ($right=~/^(?:\d*\.)?\d+$/ or $left=~/^(?:\d*\.)?\d+$/) {
+	if ($right=~/^(?:[0-9]*\.)?[0-9]+$/ or $left=~/^(?:[0-9]*\.)?[0-9]+$/) {
 	  $operator = '==' unless $negate;
 	} else {
 	  $operator = $negate ? 'ne' : 'eq';
@@ -2096,7 +2178,7 @@ sub claim_search_win {
 	qq/\$sub_queries[$sq_pos]->test_occurrences(\$node,$occ_list))/;
       my $postpone_subquery_till = $subquery->{postpone_subquery_till};
       if (defined $postpone_subquery_till) {
-	print "postponing subquery till: $postpone_subquery_till\n" if $DEBUG;
+	print STDERR "postponing subquery till: $postpone_subquery_till\n" if $DEBUG;
 	my $target_pos = TredMacro::Index($self->{pos2match_pos},$postpone_subquery_till);
 	if (defined $target_pos) {
 	  # same subquery, simply postpone, just like when recomputing conditions
@@ -2104,7 +2186,7 @@ sub claim_search_win {
 	  $opts->{recompute_condition}[$postpone_subquery_till]{$pos}=1;
 	  return ('( $$query_pos < '.$target_pos.' ? '.int(!$opts->{negative}).' : '.$condition.')');
 	} else {
-	  print "other subquery\n" if $DEBUG;
+	  print STDERR "other subquery\n" if $DEBUG;
 	  # otherwise postpone this subquery as well
 	  $self->{postpone_subquery_till}=$postpone_subquery_till if $postpone_subquery_till>($self->{postpone_subquery_till}||0);
 	  return $condition;
@@ -2222,17 +2304,30 @@ sub claim_search_win {
 
   sub serialize_target {
     my ($self,$target,$opts)=@_;
-    if ($target eq $opts->{id} and !$opts->{output_filter}) {
-      return '$node';
-    }
+    my ($node)=$self->serialize_target2($target,$opts);
+    return $node;
+  }
+  # returns the target node + file
+  sub serialize_target2 {
+    my ($self,$target,$opts)=@_;
     my $target_match_pos = $self->{name2match_pos}{$target};
+    my $this_pos = $opts->{query_pos};
+    if ($target eq $opts->{id} and !$opts->{output_filter}) {
+      return ('$node',qq{\$iterators[$this_pos]->file});
+    }
     if (defined $target_match_pos) {
       $opts->{depends_on}{$target_match_pos}=1;
-      return '$matched_nodes->['.$target_match_pos.']';
+      return (
+	'$matched_nodes->['.$target_match_pos.']',
+	'$all_iterators->['.$target_match_pos.']->file',
+      );
     } else {
-      my $pos = $opts->{query_pos};
-      my $match_pos = $self->{pos2match_pos}[$pos];
-      die "Node '$target' does not exist or belongs to a sub-query and cannot be referred from expression $opts->{expression} of node no. $match_pos!\n";
+      if ($opts->{output_filter}) {
+	die "Node '$target' does not exist or belongs to a sub-query and cannot be referred from an output filter!\n";
+      } else {
+	my $match_pos = $self->{pos2match_pos}[$this_pos];
+	die "Node '$target' does not exist or belongs to a sub-query and cannot be referred from expression $opts->{expression} of node no. $match_pos!\n";
+      }
     }
   }
 
@@ -2312,7 +2407,7 @@ sub claim_search_win {
 	      $pexp = '$var'.$#$foreach;
 	    } elsif ($decl_is == PML_LIST_DECL) {
 	      $decl = $decl->get_knit_content_decl;
-	      if ($step =~ /^\[(\d+)\]$/) {
+	      if ($step =~ /^\[([0-9]+)\]$/) {
 		push @$foreach, [0,$pexp.'->[$1]'];
 		$pexp = '$var'.$#$foreach;
 	      } else {
@@ -2417,8 +2512,6 @@ sub claim_search_win {
 	    die "Cannot use analytic function $name with an 'over' clause in this context in the output filter expression $opts->{expression}!\n";
 	  }
 	} else {
-	  print "*******************\n";
-	  print "KEY: $key\n";
 	  my ($var, $num);
 	  if ($opts->{old_aggregations} and exists $opts->{old_aggregations}{ $key }) {
 	    $num = $opts->{old_aggregations_first_column} +
@@ -2428,7 +2521,6 @@ sub claim_search_win {
 	    $opts->{vars_used}{$var}=1;
 	  } elsif ($opts->{aggregations} and exists $opts->{aggregations}{ $key }) {
 	    $num = $opts->{aggregations}{ $key }[0];
-	    print "NUM: $num (exists)\n";
 	  } else {
 	    if (!defined $opts->{aggregations}) {
 	      die "Cannot use analytic function $name without an 'over' clause in this context in the output filter expression $opts->{expression} (@{[ %$opts ]})!\n";
@@ -2436,8 +2528,6 @@ sub claim_search_win {
 	    $num =
 	      keys(%{$opts->{old_aggregations} || {}}) +
 	      keys(%{$opts->{aggregations}});
-	    print "NUM: $num (new)\n";
-	    print map "K: $_\n", keys %{$opts->{aggregations}};
 	    $opts->{aggregations}{ $key } = [ $num, $name, Fslib::CloneValue($args) ];
 	  }
 	  $var ||= '$a'.$num;
@@ -2450,6 +2540,7 @@ sub claim_search_win {
 	my $id;
 	if ($name=~/^(?:descendants|lbrothers|rbrothers|sons|depth|name)$/) {
 	  my $node;
+	  my $pos;
 	  if ($args and @$args==1 and !ref($args->[0]) and $args->[0]=~s/^\$//) {
 	    $node=$self->serialize_target($args->[0],$opts);
 	  } elsif ($args and @$args) {
@@ -2464,8 +2555,8 @@ sub claim_search_win {
 	       : ($name eq 'sons')        ? qq{ scalar(${node}->children) }
     	       : ($name eq 'depth')       ? qq{ ${node}->level }
     	       : ($name eq 'name')       ? qq{ ${node}->{'#name'} }
+		 # FIXME: need to pass fsfile as well
 	       : die "Tree_Query internal error while compiling expression: should never get here!";
-
 	  if ($opts->{output_filter}) {
 	    die "Cannot use function '$name' at this point of an output filter: '$opts->{expression}'\n"
 	      if defined($opts->{column_count});
@@ -2473,16 +2564,53 @@ sub claim_search_win {
 	  } else {
 	    return $ret;
 	  }
-	} elsif ($name=~/^(?:lower|upper|length)$/) {
+	} elsif ($name =~ /^(file|tree_no|address)$/) {
+	  my $ref;
+	  if ($args and @$args) {
+	    $ref = $args->[0];
+	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: ${name}(\$node?)\n"
+	      if (@$args>1 or not $ref=~s/^\$(?![0-9])//);
+	  } else {
+	    $ref = $this_node_id;
+	  }
+	  my ($target,$file) = $self->serialize_target2($ref,$opts);
+	  if ($name eq 'file') {
+	    return qq{$file->filename}
+	  } else {
+	    if ($name eq 'tree_no') {
+	      return qq{Fslib::Index($file->treeList,$target->root};
+	    } elsif ($name eq 'address') {
+	      return qq{TredMacro::ThisAddress($target,$file)};
+	    } else {
+	      die "Function ${name}() not yet implemented!\n";
+	    }
+	  }
+	} elsif ($name=~/^(?:lower|upper|length|abs|floor|ceil)$/) {
 	  if ($args and @$args==1) {
 	    my $func = $name eq 'lower' ? 'lc'
 	             : $name eq 'upper' ? 'uc'
-		     : 'length';
+		     : $name;
 	    return $func.'('
 	      .  $self->serialize_expression_pt($args->[0],$opts)
 		. ')';
 	  } else {
 	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: ${name}(string)\n";
+	  }
+	} elsif ($name=~/^(?:round|trunc)$/) {
+	  if ($args and @$args and @$args<3) {
+	    return $name.'('
+	         .  join(',',map { $self->serialize_expression_pt($_,$opts) } @$args)
+		. ')';
+	  } else {
+	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: ${name}(string)\n";
+	  }
+	} elsif ($name eq 'percnt') {
+	  if ($args and @$args>0 and @$args<3) {
+	    my @args = map { $self->serialize_expression_pt($_,$opts) } @$args;
+	    return 'round(100*('.$args[0].')'
+	      . (@args>1 ? ','.$args[1] : '').q[)];
+	  } else {
+	    die "Wrong arguments for function percnt() in expression $opts->{expression} of node '$this_node_id'!\nUsage: percnt(number,precision?)\n";
 	  }
 	} elsif ($name eq 'substr') {
 	  if ($args and @$args>1 and @$args<4) {
@@ -2503,7 +2631,7 @@ sub claim_search_win {
 	} elsif ($name eq 'tr') {
 	  if ($args and @$args==3) {
 	    my @args = map { $self->serialize_expression_pt($_,$opts) } @$args;
-	    return 'do{ my ($str,$from,$to) = (' .join(',', @args).'); $from=~s{/}{\\/}g; $to=~s{/}{\\/}g; eval qq{$str=~tr/$from/$to/}; $str; }';
+	    return 'do{ my ($str,$from,$to) = (' .join(',', @args).'); $from=~s{/}{\\/}g; $to=~s{/}{\\/}g; eval qq{$str=~tr/$from/$to/, 1} or die $@; $str; }';
 	  } else {
 	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,from_chars,to_chars)\n"
 	  }
@@ -2511,6 +2639,8 @@ sub claim_search_win {
 	  die "match() NOT YET IMPLEMENTED!\n";
 	} elsif ($name eq 'substitute') {
 	  die "substitue() NOT YET IMPLEMENTED!\n";
+	} else {
+	  die "$name() NOT YET IMPLEMENTED!\n";
 	}
       } elsif ($type eq 'EXP') {
 	my $out.='(';
@@ -2554,7 +2684,7 @@ sub claim_search_win {
 	  } else {
 	    return $ret;
 	  }
-	} elsif ($pt =~ /^[1-9]\d*$/) { #column reference
+	} elsif ($pt =~ /^[1-9][0-9]*$/) { #column reference
 	  die "Column reference \$$pt can only be used in an output filter; error in expression '$opts->{expression}' of node '$this_node_id'\n"
 	    unless $opts->{'output_filter'};
 	  die "Column reference \$$pt used at position where there is yet no column to refer to\n"
@@ -2619,7 +2749,7 @@ sub claim_search_win {
 	last;
       }
     }
-    print "occurrences: >=$count ($ret)\n" if $DEBUG > 1;
+    print STDERR "occurrences: >=$count ($ret)\n" if $DEBUG > 1;
     print STDERR "</subquery>\n" if $DEBUG > 1;
     $self->reset() if $count;
     return $ret;
@@ -2664,7 +2794,7 @@ sub claim_search_win {
       $have->{$node}=1 if $node;
     } elsif ($$query_pos==0) {
       # first
-      # print "Starting subquery on $opts->{seed}->{id} $opts->{seed}->{t_lemma}.$opts->{seed}->{functor}\n" if $opts->{seed} and $DEBUG;
+      # print STDERR "Starting subquery on $opts->{seed}->{id} $opts->{seed}->{t_lemma}.$opts->{seed}->{functor}\n" if $opts->{seed} and $DEBUG;
       $node
 	= $matched_nodes->[$pos2match_pos->[$$query_pos]]
 	  = $iterator->start( $opts->{seed}, $opts->{fsfile} );
@@ -2676,7 +2806,7 @@ sub claim_search_win {
 	  # backtrack
 	  $matched_nodes->[$pos2match_pos->[$$query_pos]]=undef;
 	  $$query_pos--;	# backtrack
-	  print STDERR ("backtrack to $$query_pos\n") if $DEBUG > 1;
+	  print STDERR ("backtrack to $$query_pos\n") if $DEBUG > 3;
 	  $iterator=$iterators->[$$query_pos];
 
 	  $node = $iterator->node;
@@ -2689,11 +2819,12 @@ sub claim_search_win {
 	  $have->{$node}=1 if $node;
 	  next;
 	} else {
-	  print STDERR "no match\n" if $DEBUG > 1;
+	  print STDERR "no match\n" if $DEBUG > 3;
 	  return;		# NO RESULT
 	}
       } else {
-	print STDERR ("match $node->{id} [$$query_pos,$pos2match_pos->[$$query_pos]]: $node->{afun}.$node->{t_lemma}.$node->{functor}\n") if $DEBUG > 1;
+	print STDERR ("match $node->{id} [$$query_pos,$pos2match_pos->[$$query_pos]]: $node->{afun}.$node->{t_lemma}.$node->{functor}\n")
+	  if $DEBUG > 3;
 
 	if ($$query_pos<$#$iterators) {
 	  $$query_pos++;
@@ -2708,7 +2839,7 @@ sub claim_search_win {
 	  next;
 
 	} else {
-	  print STDERR ("complete match [bool: $opts->{boolean}]\n") if $DEBUG > 1;
+	  print STDERR ("complete match [bool: $opts->{boolean}]\n") if $DEBUG > 3;
 	  # complete match:
 	  if ($opts->{boolean}) {
 	    return 1;
@@ -2770,7 +2901,7 @@ sub claim_search_win {
     my $max=0;
     my %name2node = map {
       my $n=lc($_->{name});
-      $max=$1+1 if $n=~/^n(\d+)$/ and $1>=$max;
+      $max=$1+1 if $n=~/^n([0-9]+)$/ and $1>=$max;
       (defined($n) and length($n)) ? ($n=>$_) : ()
     } @nodes;
     my $name = 'n0';
@@ -2845,7 +2976,7 @@ sub claim_search_win {
     my @parent_edge;
     for my $i (0..$#$query_nodes) {
       my $n = $query_nodes->[$i];
-      print "$i: $n->{name}\n" if $DEBUG > 1;
+      print STDERR "$i: $n->{name}\n" if $DEBUG > 1;
       my $parent = $n->parent;
       my $p = $node2pos{$parent};
       $parent[$i]=$p;
