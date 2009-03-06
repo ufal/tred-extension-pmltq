@@ -1799,9 +1799,6 @@ sub claim_search_win {
       my $sort_varlist = join(',', map '$v'.$_, @sort_columns_used);
       my $sort_colnums = join(',', map $_-1, @sort_columns_used);
       my $sort_cols = $self->serialize_col_expressions(\@sort_by_exp, \@sort_vars);
-      print STDERR map {
-	"$_ => ".$self->compute_column_data_type($_,$opts)."\n"
-      } @sort_by;
       my @op = map {
 	$self->compute_column_data_type($_,$opts)==COL_NUMERIC ?
 	  '<=>' : 'cmp'
