@@ -2633,9 +2633,29 @@ sub claim_search_win {
 	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,from_chars,to_chars)\n"
 	  }
 	} elsif ($name eq 'match') {
-	  die "match() NOT YET IMPLEMENTED!\n";
+	  if ($args and @$args>=2 and @$args<=3) {
+	    my @args = map { $self->serialize_expression_pt($_,$opts) } @$args[0,1];
+	    my $match_opts = $args->[2];
+	    if (defined($match_opts) and (ref($match_opts) or $match_opts!~/^\s*'[icnm]*'\s*$/)) {
+	      die "Wrong match options [$match_opts] for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,pattern,options?), where options is a literal string consisting only of characters from the set [icnm]\n";
+	    }
+	    $match_opts=~s/^\s*'([icnm]*)'\s*$/$1/;
+	    return 'do{ my ($str,$regexp) = (' .join(',', @args).'); $str=~/($regexp)/'.$match_opts.'  ? $1 : undef }';
+	  } else {
+	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,from_chars,to_chars)\n"
+	  }
 	} elsif ($name eq 'substitute') {
-	  die "substitue() NOT YET IMPLEMENTED!\n";
+	  if ($args and @$args>=3 and @$args<=4) {
+	    my @args = map { $self->serialize_expression_pt($_,$opts) } @$args[0..2];
+	    my $match_opts = $args->[3];
+	    if (defined($match_opts) and (ref($match_opts) or $match_opts!~/^\s*'[icnmg]*'\s*$/)) {
+	      die "Wrong match options [$match_opts] for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,pattern,options?), where options is a literal string consisting only of characters from the set [icnmg]\n";
+	    }
+	    $match_opts=~s/^\s*'([icnmg]*)'\s*$/$1/;
+	    return 'do{ my ($str,$regexp,$replacement) = (' .join(',', @args).'); $str=~s/$regexp/$replacement/'.$match_opts.'; $str }';
+	  } else {
+	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,from_chars,to_chars)\n"
+	  }
 	} else {
 	  die "$name() NOT YET IMPLEMENTED!\n";
 	}
