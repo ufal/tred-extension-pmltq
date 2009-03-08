@@ -377,10 +377,11 @@ sub search_first {
   } if $DEBUG>1;
   my $query = $opts->{query} || $root;
   $self->{query}=$query;
-  $self->{evaluator} = Tree_Query::BtredEvaluator->new($query,
+  my $evaluator = $self->{evaluator} = Tree_Query::BtredEvaluator->new($query,
 						      {
 							type_mapper => $self,
-							current_filelist => $self->{filelist} ? 1 : 0
+							current_filelist => $self->{filelist} ? 1 : 0,
+							no_filters => $opts->{no_filters},
 						      });
   $self->{current_result} = undef;
   $self->{past_results}=[];
@@ -388,7 +389,26 @@ sub search_first {
   $self->{have_all_results}=undef;
   $self->{currentFilePos} = 0;
   $self->{currentFilelistPos} = 0;
-  return $self->show_next_result;
+
+  if ($self->{evaluator}{filters}) {
+    $evaluator->init_filters($evaluator->buffer_all_filter);
+    while ($evaluator->find_next_match) {
+      $evaluator->run_filters
+    }
+    my $results = $evaluator->flush_filters;
+    my $query_id = (ref($query) && $query->{id}) || '';
+    return $results unless
+      (@$results < 200) or
+	QuestionQuery('Results',
+		      @$results,
+		      'Display','Cancel') eq 'Display';
+    Tree_Query::ShowResultTable('Results',
+				$results,
+				$query_id,
+			       );
+  } else {
+    return $self->show_next_result;
+  }
 }
 
 sub current_query {
@@ -832,19 +852,20 @@ sub claim_search_win {
       push @iterators, $iterator;
       $all_iterators->[$self->{pos2match_pos}[$i]]=$iterator;
     }
-    unless ($self->{parent_query}) {
+    unless ($self->{parent_query} or $opts->{no_filters}) {
       my $first = first { $_->{'#name'} eq 'node' and $_->{name} } $query_tree->children;
       my $output_opts = {
 	id => $first->{name},
       };
-      my ($init_code,$first_filter) = $self->serialize_filters(
+      my ($init_code,$filters) = $self->serialize_filters(
 	$query_tree->{'output-filters'},
-	$output_opts
+	$output_opts,
       );
-      if ($init_code and $first_filter) {
+      if ($init_code and @$filters) {
 	print STDERR "INIT CODE:\n",$init_code,"\n" if $DEBUG>2;
+	my $first_filter = $filters->[0];
 	$self->{filter} = eval $init_code; die $@ if $@;
-	$self->{first_filter} = $first_filter;
+	$self->{filters} = $filters;
       }
     }
     return $self;
@@ -869,15 +890,17 @@ sub claim_search_win {
   }
   sub flush_filters {
     my $self = shift;
-    if ($self->{first_filter}) {
-      return $self->{first_filter}->{finish}($self->{first_filter});
+    if ($self->{filters}) {
+      return $self->{filters}[0]->{finish}($self->{filters}[0]);
     }
     return;
   }
   sub init_filters {
-    my $self = shift;
-    if ($self->{first_filter}) {
-      return $self->{first_filter}->{init}->($self->{first_filter});
+    my ($self,$output) = @_;
+    if ($self->{filters} and @{$self->{filters}}) {
+      $output ||= $self->std_out_filter;
+      $self->{filters}[-1]->{output}=$output;
+      return $self->{filters}[0]->{init}->($self->{filters}[0]);
     }
     return;
   }
@@ -990,21 +1013,41 @@ sub claim_search_win {
       }
       $prev = $filter;
     }
-    if ($prev) {
-      $prev->{output}={
-	init => sub {
-	  print("-" x 60, "\n");
-	},
-	process_row => sub {
-	  my ($self,$row)=@_;
-	  print(join("\t",@$row)."\n");
-	},
-	finish => sub {
-	  print("-" x 60, "\n");
-	}
-      };
-    }
-    return ($opts->{filter_init},$filters[0]);
+    return ($opts->{filter_init},\@filters);
+  }
+
+  sub std_out_filter {
+    my ($self)=@_;
+    return {
+      init => sub {
+	print("-" x 60, "\n");
+      },
+      process_row => sub {
+	my ($self,$row)=@_;
+	print(join("\t",@$row)."\n");
+      },
+      finish => sub {
+	print("-" x 60, "\n");
+      }
+     };
+  }
+
+  sub buffer_all_filter {
+    my ($self)=@_;
+    return {
+      init => sub {
+	my ($self)=@_;
+	$self->{saved_rows}=[];
+      },
+      process_row => sub {
+	my ($self,$row)=@_;
+	push @{$self->{saved_rows}}, $row;
+      },
+      finish => sub {
+	my ($self)=@_;
+	return $self->{saved_rows};
+      }
+     };
   }
 
   my %aggregation_template = (

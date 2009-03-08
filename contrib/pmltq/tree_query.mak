@@ -2267,5 +2267,51 @@ sub AutoNameAllNodes {
   init_id_map($root,2);
 }
 
+### Displaying results
+
+sub ShowResultTable {
+  my ($title,$results,$query_id)=@_;
+  return EditBoxQuery(
+    ($title||"Results"),
+    join("\n",map { join("\t",@$_) } @$results),
+    qq{},
+    {
+      -buttons=>['Close','Save To File'],
+      -init => sub {
+	my ($d)=@_;
+	$d->Subwidget('B_Save To File')->configure(
+	  -command => sub {
+	    my $filename = main::get_save_filename(
+	      $d,
+	      -filetypes=>[["CSV",['.csv','.txt']],
+			   ["All files",['*','*.*']],
+			  ],
+	      -title => "Save results as ...",
+	      -initialfile=> ($query_id ? "results_for_".$query_id.".txt" : 'results.txt'),
+	     );
+	    return unless defined($filename) and length($filename);
+	    my $backup;
+	    if (-f $filename) {
+	      $backup=1 if rename $filename, $filename.'~';
+	    }
+	    if (open my $fh, '>:utf8', $filename) {
+	      for (@$results) {
+		print $fh join("\t",@$_)."\n";
+	      }
+	      close $fh;
+	    } else {
+	      TrEd::Basics::errorMessage($d,'Cannot write to '.$filename.': '.$!);
+	      if ($backup) {
+		rename $filename.'~', $filename;
+	      }
+	    }
+	  });
+      }
+     }
+   );
+}
+
+
+
 } # use strict
 1;
