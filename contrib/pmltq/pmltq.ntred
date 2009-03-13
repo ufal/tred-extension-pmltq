@@ -1,0 +1,97 @@
+#!btred -e search
+# -*- mode: cperl; coding: utf-8 -*-
+
+#encoding UTF-8
+# $Tree_Query_Btred::DEBUG=2;
+
+package TredMacro;
+
+my $query;
+
+use Getopt::Long;
+my $optparser=new Getopt::Long::Parser(config => ["bundling"]);
+my %opts;
+$optparser->getoptions(\%opts,
+		       "query-pml-file|p=s",
+		       "query-file|f=s",
+		       "filters|F=s",
+		       "filter-code-out|o=s",
+		       "query-id|i=s",
+		      );
+my $query_file; # if used, we need the file persistently
+if ($opts{'query-pml-file'}) {
+  $query_file = FSFile->newFSFile($opts{'query-pml-file'},[Backends()])
+    or die "Failed to open PML query file: $opts{'query-pml-file'}!";
+  $query = first {
+    !$opts{'query-id'} or $_->{id} eq $opts{'query-id'}
+  } $query_file->trees;
+  die "Didn't find query $opts{'query-id'} in query file $opts{'query-pml-file'}!"
+    unless $query;
+} elsif ($opts{'query-file'}) {
+  open my $fh, '<:utf8', $opts{'query-file'} || die "Cannot open query file ".$opts{'query-file'}.": $!\n";
+  local $/;
+  $query = <$fh>;
+  if ($opts{'query-id'}) {
+    $query=~s/#\s*==\s*query:\s*\Q$opts{'query-id'}\E\s* ==(.*?)(?:#\s*==\s*query:\s*\w+\s*==.*|$)/$1/s;
+  }
+} else {
+  $query = join (' ',@ARGS);
+}
+
+die "Query is empty!" unless $query;
+
+
+my $filters = $opts{'filters'};
+if ($filters=~/\S/) {
+  $filters='>> '.$filters unless $filters =~ /^\s*>>/;
+  if (ref($query)) {
+    $query->{'output-filters'}||=Fslib::List->new();
+    push @{$query->{'output-filters'}},@{ Tree_Query::Common->parse_filters($filters) };
+  } elsif ($query) {
+    $query .= $filters;
+  }
+}
+
+my $search;
+use Data::Dumper;
+
+sub init_search {
+  my $mapper = Tree_Query::TypeMapper->new({file=>CurrentFile()});
+  my $search = Tree_Query::BtredEvaluator->new($query, {
+    type_mapper => $mapper,
+    plan => 1,
+  });
+  undef $query; # not needed anymore
+  undef $query_file;
+  my $filters = $search->get_filters;
+  if ($filters and @$filters) {
+    if (!$TredMacro::NTRED_SERVER_NO or $TredMacro::NTRED_SERVER_NO == 1) {
+      my $fh;
+      if ($opts{'filter-code-out'}) {
+	open $fh, '>', $opts{'filter-code-out'} || die "Cannot open $opts{'filter-code-out'} for writing: $!\n";
+      } else {
+	$fh=\*STDERR;
+      }
+      print $fh Data::Dumper->Dump([[map { { code=>$_->{code}, local_filters_code => $_->{local_filters_code} } } @$filters]],['filters']);
+    }
+    @$filters = ($search->std_out_filter);
+  }
+  $search->init_filters;
+  return $search;
+}
+
+
+# $Tree_Query_Btred::DEBUG = 1;
+sub search {
+  $search ||= init_search();
+  while ($search->find_next_match) {
+    unless ($search->run_filters) {
+      FPosition($search->r($variable));
+    }
+  }
+  $search->reset(); # prepare for next file
+}
+
+sub exit_hook {
+  $search && $search->flush_filters;
+}
