@@ -390,19 +390,44 @@ sub search_first {
   $self->{currentFilePos} = 0;
   $self->{currentFilelistPos} = 0;
 
-  if ($self->{evaluator}{filters}) {
-    $evaluator->init_filters($evaluator->buffer_all_filter);
-    while ($evaluator->find_next_match) {
-      $evaluator->run_filters
-    }
-    my $results = $evaluator->flush_filters;
+  if ($self->{evaluator}{filters} and !$opts->{no_filters}) {
+    my $canvas = ToplevelFrame()->Canvas();
+    my $search_win= TrEd::Window->new(TrEd::TreeView->new($canvas),framegroup=>$grp->{framegroup}); # main::newTreeView(TrEd())
+    $search_win->{macroContext}='TredMacro';
+    $search_win->{stylesheet} = STYLESHEET_FROM_FILE();
+    $search_win->{noRedraw}=1;
+    my @save = ($grp,$root,$this);
+    $grp=$search_win;
+    my $results;
+    eval {
+      if ($self->{filelist}) {
+	SetCurrentFileList($self->{filelist},$search_win);
+	GotoFileNo(0);
+	GotoTree(1);
+      } else {
+	Open($self->{file},{-keep_related=>1});
+	GotoTree(1);
+      }
+      $evaluator->init_filters($evaluator->buffer_all_filter);
+      while ($evaluator->find_next_match) {
+	$evaluator->run_filters
+      }
+      CloseFile();
+      $results = $evaluator->flush_filters;
+    };
+    ($grp,$root,$this)=@save;
+    $canvas->destroy;
+    undef $search_win;
+    die $@ if $@;
+
     my $query_id = (ref($query) && $query->{id}) || '';
+    my $how_many = scalar(@$results).' row'.(@$results != 1 ? 's' : '' );
     return $results unless
       (@$results < 200) or
 	QuestionQuery('Results',
-		      @$results,
+		      $how_many,
 		      'Display','Cancel') eq 'Display';
-    Tree_Query::ShowResultTable('Results',
+    Tree_Query::ShowResultTable('Results ('.$how_many.')',
 				$results,
 				$query_id,
 			       );
@@ -468,7 +493,7 @@ sub prepare_results {
 	print STDERR "Current filename: ", ThisAddress(),"\n" if $DEBUG > 1;
       } else {
 	Open($self->{file},{-keep_related=>1});
-	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 0);
+	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 1);
       }
       my $result;
       eval {
@@ -657,7 +682,6 @@ sub claim_search_win {
 
   sub new {
     my ($class,$query_tree,$opts)=@_;
-
     $opts ||= {};
     #######################
     # The following lexical variables may be used directly by the
@@ -709,7 +733,6 @@ sub claim_search_win {
     croak(__PACKAGE__."->new: missing required option: type_mapper") unless $self->{type_mapper};
     weaken($self->{parent_query}) if $self->{parent_query};
     $query_pos = \$self->{query_pos};
-
 
     my $clone_before_plan = 0;
     if (ref($query_tree)) {
@@ -904,6 +927,10 @@ sub claim_search_win {
     }
     return;
   }
+  sub get_filters {
+    my ($self) = @_;
+    return $self->{filters};
+  }
 
   sub r {
     my ($self,$name)=@_;
@@ -1020,14 +1047,14 @@ sub claim_search_win {
     my ($self)=@_;
     return {
       init => sub {
-	print("-" x 60, "\n");
+	# print("-" x 60, "\n");
       },
       process_row => sub {
 	my ($self,$row)=@_;
 	print(join("\t",@$row)."\n");
       },
       finish => sub {
-	print("-" x 60, "\n");
+	# print("-" x 60, "\n");
       }
      };
   }
@@ -1078,7 +1105,6 @@ sub claim_search_win {
 	  count => '0',
 	  avg => '[undef,0]',
 	  concat => '[]',
-#	  ratio => '0',
 	);
   my %aggregation_op = (
 	  sum => q`$self->{aggregated}[$i] += _ARG_;`,
@@ -1091,13 +1117,11 @@ sub claim_search_win {
 	  avg => q`my $avg = $self->{aggregated}[$i];
                    $self->{aggregated}[$i][0] += _ARG_;
                    $self->{aggregated}[$i][1] ++;`, # shell we count null values as 0 ?
-	  concat => q`push @{$self->{aggregated}[$i]}, _ARG_;`, # shell we count null values as 0 ?
-	  #	  ratio => q`$self->{aggregated}[$i] += _ARG_;`, # not sure how to implement
+	  concat => q`push @{$self->{aggregated}[$i]}, [_ARG_,_SORT_ARGS_];`, # shell we count null values as 0 ?
 	 );
   my %aggregation_final = (
 	  avg => q`_RESULT_ = (_RESULT_->[0] / _RESULT_->[1]);`, # shell we count null values as 0 ?
-	  concat => q`_RESULT_ = join(_ARG1_, @{_RESULT_});`, # shell we count null values as 0 ?
-	  #	  ratio => q`$self->{aggregated}[$i] += _ARG_;`, # not sure how to implement
+	  concat => q`_RESULT_ = join(_ARG1_, map $_->[0], _SORT_CMP_ @{_RESULT_});`, # shell we count null values as 0 ?
 	 );
 
   my %code_template = (
@@ -1300,9 +1324,7 @@ sub claim_search_win {
        finish => sub {
          my ($self)=@_;
          my $saved_rows = $self->{saved_rows};
-         @$saved_rows = sort {
-           _SORT_CMP_
-         } @$saved_rows;
+         @$saved_rows = _SORT_CMP_ @$saved_rows;
          my $row;
          my $out = $self->{output};
          while ($row = shift @$saved_rows) {
@@ -1415,7 +1437,7 @@ sub claim_search_win {
       # we run serialize_filter using only group_by
       # and the faked return
 
-      my @aggregations = sort { $a->[0] <=> $a->[1] } values %aggregations;
+      my @aggregations = sort { $a->[0] <=> $b->[0] } values %aggregations;
 
       if ($DEBUG>2) {
 	print STDERR "========================\n";
@@ -1430,6 +1452,8 @@ sub claim_search_win {
 	  (map [ 'ANALYTIC_FUNC',
 		 $_->[1], # name
 		 Fslib::CloneValue($_->[2]), # args
+		 undef, # over
+		 Fslib::CloneValue($_->[4]), # sort by
 		], @aggregations),
 	 ),
       };
@@ -1607,7 +1631,26 @@ sub claim_search_win {
 	     column_count => $opts->{column_count},
 	     is_first_filter => $is_first_filter,
 	   }), @{$_->[2]} # args
-	 ]
+	 ],
+	 [ # sort_by columns and types
+	   map {
+	     my $type = $self->compute_column_data_type($_,$opts);
+	     [
+	     $self->serialize_column($_, {
+	       %$opts,
+	       var_prefix => 'v',
+	       columns_used => ($aggregations_columns[$agg_no]||={}),
+	       foreach => ($is_first_filter ? \@foreach : undef),
+	       input_columns => ($is_first_filter ? \@input_columns : undef),
+	       vars_used => ($aggregations_vars[$agg_no][$col_no++]={}),
+	       local_aggregations => undef,
+	       aggregations => $opts->{aggregations}, # not applicable
+	       column_count => $opts->{column_count},
+	       is_first_filter => $is_first_filter,
+	     }),
+	     $type
+	    ]} @{$_->[4]} # sort_by
+	 ],
 	]
       } @aggregations;
     }
@@ -1668,6 +1711,7 @@ sub claim_search_win {
 	for my $aggr (@aggregations_exp) {
 	  my $funcname = $aggr->[0];
 	  my $args = $aggr->[1];
+	  my $sort_by_columns_and_types = $aggr->[2];
 	  my $agg_code = $aggregation_template{$funcname} || $aggregation_template{_DEFAULT_} ;
 	  my @columns_used = uniq(sort keys(%{$aggregations_columns[$i]}));
 	  my $varlist = join(',', map '$v'.$_, @columns_used);
@@ -1678,6 +1722,7 @@ sub claim_search_win {
 	    _code_substitute($op,
 			     {
 			       _ARG_ => $args->[0],
+			       _SORT_ARGS_ => join(',',map $_->[0], @$sort_by_columns_and_types),
 			     }
 			    )
 	  }
@@ -1697,14 +1742,21 @@ sub claim_search_win {
 	  if (exists $aggregation_final{$funcname}) {
 	    my $final_code = $aggregation_final{$funcname};
 	    my $arg1;
+	    my $sort_cmp;
 	    if ($funcname eq 'concat') {
 	      $arg1 = $aggr->[1][1];
 	      $arg1 = defined($arg1) && length($arg1) ? $arg1 : q('');
+	      my @op = map { $_->[1]==COL_NUMERIC ? '<=>' : 'cmp' } @$sort_by_columns_and_types;
+	      $sort_cmp = join(' or ',
+				  map '( $a->['.($_+1).'] '.$op[$_].' $b->['.($_+1).'])',
+				  0..$#$sort_by_columns_and_types
+				 );
 	    }
 	    _code_substitute($final_code,
 			     {
 			       _RESULT_ => '$a'.$i,
 			       _ARG1_ => $arg1,
+			       _SORT_CMP_ => ($sort_cmp ? 'sort {'.$sort_cmp.'}' : '')
 			     });
 	    push @agg_final,$final_code;
 	  }
@@ -1781,8 +1833,8 @@ sub claim_search_win {
       print STDERR sprintf("%3s\t%s",$i++,$_."\n") for split /\n/,$code;
     }
     $output_filter = eval $code; die $@ if $@;
+    $output_filter->{local_filters_code} = [ map $_->{code}, @local_filters ];
     $output_filter->{code}=$code;
-
 
     # filter_init:
     if ($is_first_filter) {
@@ -1799,7 +1851,10 @@ sub claim_search_win {
 		      );
       # now we simulate a left join
       {
-	my @wrap_l=[0,'sub {'];
+	my @wrap_l=([0,'sub {'],
+		    [1,'my ($self)=@_;'],
+		    [1,'my $first_filter = $self->{filters}[0];'],
+		   );
 	my @wrap_r=([0,'}']);
 	my $i=0;
 	my $indent=0;
@@ -1854,7 +1909,7 @@ sub claim_search_win {
 			 _SORT_VARLIST_ => $sort_varlist,
 			 _SORT_COLNUMS_ => $sort_colnums,
 			 _SORT_COLS_ => $sort_cols,
-			 _SORT_CMP_ => $sort_cmp,
+			 _SORT_CMP_ => ($sort_cmp ? 'sort {'.$sort_cmp.'}' : '')
 		       }
 		      );
       if ($DEBUG>2) {
@@ -2074,7 +2129,7 @@ sub claim_search_win {
     my $sub = qq(#line 1 "query-node/${match_pos}"\n)
       . 'sub { my ($node,$fsfile,$backref)=@_; '."\n  "
        .$nodetest
-       .(defined($type_name) && length($type_name) ? "\n and ".q[$node->type->get_decl_path =~ m{^\!].$type_name.q[(?:\.type)$}] : ())
+       .(defined($type_name) && length($type_name) ? "\n and ".q[$node->type->get_decl_path =~ m{^\!].$type_name.q[(?:\.type)?$}] : ())
        .(defined($conditions) ? "\n  and ".$conditions : '')
        . $check_preceding
        ."\n}";
@@ -2486,13 +2541,21 @@ sub claim_search_win {
 	    }
 	  }
 	} elsif (@$args>1) {
-	  die "The analytic function $name takes at most one arguments in the output filter expression $opts->{expression}!\n";
+	  die "The analytic function $name takes at most one argument in the output filter expression $opts->{expression}!\n";
 	} elsif (@$args==0) {
 	  if ($opts->{column_count} and !$opts->{is_first_filter}) {
 	    $args=['$1'];
 	  } else {
 	    $args=['0'];
 	  }
+	}
+	if ($name eq 'ratio') {
+	  return $self->serialize_expression_pt([
+	    'EXP', Fslib::CloneValue($args->[0]), 'div', [ 'ANALYTIC_FUNC', 'sum', $args, $over ]  # ratio($1 over $2) translates to $1/sum($1 over $2)
+	   ] ,$opts);
+	}
+	if ($sort and @$sort and $name ne 'concat') {
+	  warn "The 'sort by' clause has no effect in analytic function ${name}() in expression $opts->{expression}!\n";
 	}
 	if ($over and @$over) {
 	  if ($opts->{local_aggregations}) {
@@ -2511,6 +2574,7 @@ sub claim_search_win {
 	    }
 	    my @vars;
 	    my $i = -1;
+
 	    my @cols = map {
 	      $i++;
 	      my $j = 0;
@@ -2568,7 +2632,7 @@ sub claim_search_win {
 	    $num =
 	      keys(%{$opts->{old_aggregations} || {}}) +
 	      keys(%{$opts->{aggregations}});
-	    $opts->{aggregations}{ $key } = [ $num, $name, Fslib::CloneValue($args) ];
+	    $opts->{aggregations}{ $key } = [ $num, $name, Fslib::CloneValue($args), undef, Fslib::CloneValue($sort) ];
 	  }
 	  $var ||= '$a'.$num;
 	  $opts->{vars_used}{$var}=1;
@@ -2695,7 +2759,7 @@ sub claim_search_win {
 	      die "Wrong match options [$match_opts] for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,pattern,options?), where options is a literal string consisting only of characters from the set [icnmg]\n";
 	    }
 	    $match_opts=~s/^\s*'([icnmg]*)'\s*$/$1/;
-	    return 'do{ my ($str,$regexp,$replacement) = (' .join(',', @args).'); $str=~s/$regexp/$replacement/'.$match_opts.'; $str }';
+	    return 'do{ my ($str,$regexp,$replacement) = (' .join(',', @args).'); $regexp=~s{/}{\\\\/}g; $replacement=~s{/}{\\\\/}g; eval qq{\$str=~s/$regexp/$replacement/'.$match_opts.'}; $str }';
 	  } else {
 	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,from_chars,to_chars)\n"
 	  }
@@ -3265,10 +3329,9 @@ sub claim_search_win {
     my $fsfile = $grp->{FSFile};
     while ($n) {
       $n = $n->following
-	|| (TredMacro::NextTree() && $this ) 
+	|| (TredMacro::NextTree() && $this )
 	||  (TredMacro::NextFile() && ($fsfile=$grp->{FSFile}) && $this)
 	  ;
-      TredMacro::FPosition();
       last if $conditions->($n,$fsfile);
     }
     return $self->[NODE]=$n;
