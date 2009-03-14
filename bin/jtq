@@ -5,7 +5,7 @@ readlink_nf () {
     perl -MCwd -e 'print Cwd::abs_path(shift)' "$1"
 }
 
-shell_quite_args () {
+shell_quote_args () {
   quoted=""
   for s in "$@"; do
     quoted+=" '"${s//\'/\'\\\'\'}"'"
@@ -226,8 +226,8 @@ jtred_cmdline+=(-- -o "${SCRIPT_FLAGS[@]}" --filter-code-out "${FILTER_FILE}" "$
 
 if [ -n "$SSH" ]; then
     ssh "$SSH" "if [ -f ~/.bash_profile ]; then . ~/.bash_profile; elif [ -f ~/.profile ]; then . ~/.profile; fi; "\
-               "cd $(shell_quite_args "$PWD"); "\
-               "$(shell_quite_args ${jtred_cmdline[@]})"
+               "cd $(shell_quote_args "$PWD"); "\
+               "$(shell_quote_args ${jtred_cmdline[@]})"
 else
     "${jtred_cmdline[@]}"
 fi 2>&1 >"$OUT_FILE" |
