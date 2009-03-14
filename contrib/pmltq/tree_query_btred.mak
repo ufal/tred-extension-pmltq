@@ -1314,12 +1314,7 @@ sub claim_search_win {
        },
        process_row => sub {
          my ($self,$row)= @_;
-         #<IF_LEN _SORT_VARLIST_>
-	 my (_SORT_VARLIST_) = @$row[_SORT_COLNUMS_];
-         #</IF_LEN>
-         push @{$self->{saved_rows}}, [$row, [
-	   _SORT_COLS_
-	 ]];
+         push @{$self->{saved_rows}}, [$row];
        },
        finish => sub {
          my ($self)=@_;
@@ -1328,7 +1323,7 @@ sub claim_search_win {
          my $row;
          my $out = $self->{output};
          while ($row = shift @$saved_rows) {
-           $out->{process_row}->($out, $row->[0]);
+           $out->{process_row}->($out, $row);
          }
 	 $out->{finish}($out);
        }
@@ -1519,24 +1514,14 @@ sub claim_search_win {
       }) } @group_by
     };
 
-
-    my %sort_aggregations;
-    my %sort_columns;
-    my @sort_vars;
     my @sort_by_exp = do {
       my $i = 0;
-      map $self->serialize_column($_, {
-	%$opts,
-	var_prefix => 'v',
-	foreach => ($is_first_filter && !@group_by ? \@foreach : undef),
-	input_columns => ($is_first_filter  && !@group_by ? \@input_columns : undef),
-	vars_used => ($sort_vars[$i++]={}),
-#        local_aggregations => \%sort_aggregations,
-	columns_used => \%sort_columns,
-	aggregations => undef, # not applicable
-        column_count => scalar @return,
-	is_first_filter => $is_first_filter,
-      }), @sort_by
+      my ($col,$dir) =~ /\$(\d+)\s+(asc|desc)/;
+      my $max_col_no = scalar @return;
+      if ($col > $max_col_no) {
+	die "Invalid number $col in sort by clause (there are only $max_col_no output columns)!\n";
+      }
+      map [$col,$self->compute_column_data_type('$'.$col,$opts),$dir], @sort_by
     };
 
     my @local_filters;
@@ -1666,13 +1651,11 @@ sub claim_search_win {
 	return_agg => \%return_aggregations,
 	group_by_exp => \@group_by_exp,
 	sort_by_exp => \@sort_by_exp,
-	sort_agg => \%sort_aggregations,
       });
     }
 
     my @columns_used = uniq(sort keys(%return_columns));
     my @g_columns_used = uniq(sort keys(%group_columns));
-    my @sort_columns_used = uniq(sort keys(%sort_columns));
     
     # In case we moved aggregations to a separate filter
     # that precedes this one, we want
@@ -1894,21 +1877,19 @@ sub claim_search_win {
 	RETURN => 0,
 	DISTINCT => 0,
       },'sort_'.$opts->{filter_id});
-      my $sort_varlist = join(',', map '$v'.$_, @sort_columns_used);
-      my $sort_colnums = join(',', map $_-1, @sort_columns_used);
-      my $sort_cols = $self->serialize_col_expressions(\@sort_by_exp, \@sort_vars);
-      my @op = map {
-	$self->compute_column_data_type($_,$opts)==COL_NUMERIC ?
-	  '<=>' : 'cmp'
-      } @sort_by;
+#      my $sort_varlist = join(',', map '$v'.$_, @sort_columns_used);
+#      my $sort_colnums = join(',', map $_-1, @sort_columns_used);
+#      my $sort_cols = $self->serialize_col_expressions(\@sort_by_exp, \@sort_vars);
+      my @op = map { $_->[1]==COL_NUMERIC ? '<=>' : 'cmp' } @sort_by_exp;
       my $sort_cmp = join(' or ',
-			  map '( $a->[1]['.$_.'] '.$op[$_].' $b->[1]['.$_.'])',
-			  0..$#sort_by_exp);
+			  map {
+			    (($_->[2] and $_->[2] eq 'desc') ? '-' : '')
+			   .'( $a->['.$_->[0].'] '
+			   .($_->[1]==COL_NUMERIC ? '<=>' : 'cmp')
+			   .' $b->['.$_->[0].'])'
+			 } @sort_by_exp);
       _code_substitute($sort_code,
 		       {
-			 _SORT_VARLIST_ => $sort_varlist,
-			 _SORT_COLNUMS_ => $sort_colnums,
-			 _SORT_COLS_ => $sort_cols,
 			 _SORT_CMP_ => ($sort_cmp ? 'sort {'.$sort_cmp.'}' : '')
 		       }
 		      );
