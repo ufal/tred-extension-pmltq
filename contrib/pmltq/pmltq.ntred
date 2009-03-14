@@ -12,10 +12,12 @@ use Getopt::Long;
 my $optparser=new Getopt::Long::Parser(config => ["bundling"]);
 my %opts;
 $optparser->getoptions(\%opts,
+		       "query|Q=s",
 		       "query-pml-file|p=s",
 		       "query-file|f=s",
 		       "filters|F=s",
 		       "filter-code-out|o=s",
+		       "apply-filters",
 		       "query-id|i=s",
 		      );
 my $query_file; # if used, we need the file persistently
@@ -35,7 +37,7 @@ if ($opts{'query-pml-file'}) {
     $query=~s/#\s*==\s*query:\s*\Q$opts{'query-id'}\E\s* ==(.*?)(?:#\s*==\s*query:\s*\w+\s*==.*|$)/$1/s;
   }
 } else {
-  $query = join (' ',@ARGS);
+  $query = $opts{query} || join (' ',@ARGS);
 }
 
 die "Query is empty!" unless $query;
@@ -63,18 +65,20 @@ sub init_search {
   });
   undef $query; # not needed anymore
   undef $query_file;
-  my $filters = $search->get_filters;
-  if ($filters and @$filters) {
-    if (!$TredMacro::NTRED_SERVER_NO or $TredMacro::NTRED_SERVER_NO == 1) {
-      my $fh;
-      if ($opts{'filter-code-out'}) {
-	open $fh, '>', $opts{'filter-code-out'} || die "Cannot open $opts{'filter-code-out'} for writing: $!\n";
-      } else {
-	$fh=\*STDERR;
+  unless ($opts{'apply-filters'}) {
+    my $filters = $search->get_filters;
+    if ($filters and @$filters) {
+      if (!$TredMacro::NTRED_SERVER_NO or $TredMacro::NTRED_SERVER_NO == 1) {
+	my $fh;
+	if ($opts{'filter-code-out'}) {
+	  open $fh, '>', $opts{'filter-code-out'} || die "Cannot open $opts{'filter-code-out'} for writing: $!\n";
+	} else {
+	  $fh=\*STDERR;
+	}
+	print $fh Data::Dumper->Dump([[map { { code=>$_->{code}, local_filters_code => $_->{local_filters_code} } } @$filters]],['filters']);
       }
-      print $fh Data::Dumper->Dump([[map { { code=>$_->{code}, local_filters_code => $_->{local_filters_code} } } @$filters]],['filters']);
+      @$filters = ($search->std_out_filter);
     }
-    @$filters = ($search->std_out_filter);
   }
   $search->init_filters;
   return $search;
