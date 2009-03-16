@@ -673,7 +673,7 @@ sub claim_search_win {
                          $type eq 'a-node.type' ? PML_A::GetEParents($start,\\&PML_A::DiveAuxCP) : ()) }),
     'a/lex.rf|a/aux.rf' => q(grep $_ eq $end->{id}, GetANodeIDs()),
     'a/lex.rf' => q(do { my $id=$start->attr('a/lex.rf'); $id=~s/^.*?#//; $id  eq $end->{id} } ),
-    'a/aux.rf' => q(grep { my $id=$_; $id=~s/^.*?#//; $id eq $end->{id} } TredMacro::ListV($start->attr('a/lex.rf'))),
+    'a/aux.rf' => q(grep { my $id=$_; $id=~s/^.*?#//; $id eq $end->{id} } TredMacro::ListV($start->attr('a/aux.rf'))),
     'coref_text.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_text.rf'})),
     'coref_gram.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_gram.rf'})),
     'compl.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'compl.rf'})),
