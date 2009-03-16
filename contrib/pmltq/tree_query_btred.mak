@@ -949,7 +949,7 @@ sub claim_search_win {
   sub reset {
     my ($self)=@_;
     $self->{query_pos} = 0;
-    %{$self->{have}}=$self->{parent_query} ? %{$self->{parent_query}{have}} : ();
+    %{$self->{have}}= (); #$self->{parent_query} ? %{$self->{parent_query}{have}} : ();
     $_->reset for @{$self->{iterators}};
   }
 
@@ -1314,7 +1314,7 @@ sub claim_search_win {
        },
        process_row => sub {
          my ($self,$row)= @_;
-         push @{$self->{saved_rows}}, [$row];
+         push @{$self->{saved_rows}}, $row;
        },
        finish => sub {
          my ($self)=@_;
@@ -1516,12 +1516,20 @@ sub claim_search_win {
 
     my @sort_by_exp = do {
       my $i = 0;
-      my ($col,$dir) =~ /\$(\d+)\s+(asc|desc)/;
-      my $max_col_no = scalar @return;
-      if ($col > $max_col_no) {
-	die "Invalid number $col in sort by clause (there are only $max_col_no output columns)!\n";
-      }
-      map [$col,$self->compute_column_data_type('$'.$col,$opts),$dir], @sort_by
+      map {
+	if (/^\$(\d+)(?:\s+(asc|desc))?$/) {
+	  my ($col,$dir) = ($1,$2);
+	  my $max_col_no = scalar @return;
+	  if ($col > $max_col_no) {
+	    die "Invalid number $col in sort by clause (there are only $max_col_no output columns)!\n";
+	  }
+	  [$col,$self->compute_column_data_type('$'.$col,$opts),$dir]
+	} elsif (defined and length) {
+	  die "Invalid sort column: $_\n";
+	} else {
+	  ()
+	}
+      } @sort_by
     };
 
     my @local_filters;
@@ -1884,9 +1892,9 @@ sub claim_search_win {
       my $sort_cmp = join(' or ',
 			  map {
 			    (($_->[2] and $_->[2] eq 'desc') ? '-' : '')
-			   .'( $a->['.$_->[0].'] '
+			   .'( $a->['.($_->[0]-1).'] '
 			   .($_->[1]==COL_NUMERIC ? '<=>' : 'cmp')
-			   .' $b->['.$_->[0].'])'
+			   .' $b->['.($_->[0]-1).'])'
 			 } @sort_by_exp);
       _code_substitute($sort_code,
 		       {
@@ -2025,7 +2033,7 @@ sub claim_search_win {
     } else {
       if ($pt=~/^[-0-9]/) {  # literal number
 	return COL_NUMERIC;
-      } elsif ($pt=~/^'/) {  # literal string
+      } elsif ($pt=~/^['"]/) {  # literal string
 	return COL_STRING;
       } elsif ($pt=~/^\$/) {
 	my $var = $pt; $var=~s/^\$//;
@@ -2035,7 +2043,7 @@ sub claim_search_win {
 	  return COL_UNKNOWN;
 	}
       } else {
-	die "Unrecognized sub-expression: $pt\n";
+	confess( "Unrecognized sub-expression: $pt\n" );
       }
     }
   }
@@ -2394,7 +2402,7 @@ sub claim_search_win {
     if (defined $target_match_pos) {
       $opts->{depends_on}{$target_match_pos}=1;
       return (
-	'$matched_nodes->['.$target_match_pos.']',
+	($opts->{output_filter} ? '$all_iterators->['.$target_match_pos.']->node' : '$matched_nodes->['.$target_match_pos.']'),
 	'$all_iterators->['.$target_match_pos.']->file',
       );
     } else {
@@ -2975,6 +2983,7 @@ sub claim_search_win {
     'user-defined:coref_text.rf' => 1,
     'user-defined:coref_gram.rf' => 1,
     'user-defined:compl.rf' => 1,
+    'user-defined:a/tree.rf' => 1,
     'descendant' => 30,
     'ancestor' => 8,
     'parent' => 0.5,
@@ -3027,8 +3036,8 @@ sub claim_search_win {
     }
     my $w = $weight{$name};
     return $w if defined $w;
-    warn "do not have weight for edge: '$name'\n";
-    return;
+    warn "do not have weight for edge: '$name'; assuming 5\n";
+    return 5;
   }
   sub reversed_rel {
     my ($ref)=@_;
