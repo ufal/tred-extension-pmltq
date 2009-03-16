@@ -1489,13 +1489,6 @@ sub claim_search_win {
       # and _RET_COLNUMS_ is serialized as 0..$#cols_used + @aggregations
     }
 
-    $opts->{column_types} = [
-      map $self->compute_column_data_type($_,{
-	%$opts,
-	column_types => $prev_types,
-      }), @return
-    ];
-
     my %group_columns;
     my @group_vars;
     my @group_by_exp = do {
@@ -1512,24 +1505,6 @@ sub claim_search_win {
         column_count => $opts->{column_count},
 	is_first_filter => $is_first_filter,
       }) } @group_by
-    };
-
-    my @sort_by_exp = do {
-      my $i = 0;
-      map {
-	if (/^\$(\d+)(?:\s+(asc|desc))?$/) {
-	  my ($col,$dir) = ($1,$2);
-	  my $max_col_no = scalar @return;
-	  if ($col > $max_col_no) {
-	    die "Invalid number $col in sort by clause (there are only $max_col_no output columns)!\n";
-	  }
-	  [$col,$self->compute_column_data_type('$'.$col,$opts),$dir]
-	} elsif (defined and length) {
-	  die "Invalid sort column: $_\n";
-	} else {
-	  ()
-	}
-      } @sort_by
     };
 
     my @local_filters;
@@ -1648,6 +1623,31 @@ sub claim_search_win {
       } @aggregations;
     }
 
+    $opts->{column_types} = [
+      map $self->compute_column_data_type($_,{
+	%$opts,
+	column_types => $prev_types,
+      }), @return
+    ];
+
+    my @sort_by_exp = do {
+      my $i = 0;
+      map {
+	if (/^\$(\d+)(?:\s+(asc|desc))?$/) {
+	  my ($col,$dir) = ($1,$2);
+	  my $max_col_no = scalar @return;
+	  if ($col > $max_col_no) {
+	    die "Invalid number $col in sort by clause (there are only $max_col_no output columns)!\n";
+	  }
+	  [$col,$self->compute_column_data_type('$'.$col,$opts),$dir]
+	} elsif (defined and length) {
+	  die "Invalid sort column: $_\n";
+	} else {
+	  ()
+	}
+      } @sort_by
+    };
+
     $opts->{column_count} = scalar @return;
 
     if ($DEBUG>2) {
@@ -1659,6 +1659,7 @@ sub claim_search_win {
 	return_agg => \%return_aggregations,
 	group_by_exp => \@group_by_exp,
 	sort_by_exp => \@sort_by_exp,
+	colum_types => $opts->{column_types},
       });
     }
 
