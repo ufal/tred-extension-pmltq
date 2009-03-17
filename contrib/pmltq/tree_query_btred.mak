@@ -2749,7 +2749,7 @@ sub claim_search_win {
 	      die "Wrong match options [$match_opts] for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,pattern,options?), where options is a literal string consisting only of characters from the set [icnmg]\n";
 	    }
 	    $match_opts=~s/^\s*'([icnmg]*)'\s*$/$1/;
-	    return 'do{ my ($str,$regexp,$replacement) = (' .join(',', @args).'); $regexp=~s{/}{\\\\/}g; $replacement=~s{/}{\\\\/}g; eval qq{\$str=~s/$regexp/$replacement/'.$match_opts.'}; $str }';
+	    return 'do{ my ($str,$regexp,$replacement) = (' .join(',', @args).'); $regexp=~s{/}{\\\\/}g; $replacement=~s{/}{\\\\/}g; $replacement=~s{(\\\\([0-9])|\\\\[^0-9])}{defined $2 ? q($).$2 : $1}ge; eval qq{\$str=~s/$regexp/$replacement/'.$match_opts.'}; $str }';
 	  } else {
 	    die "Wrong arguments for function ${name}() in expression $opts->{expression} of node '$this_node_id'!\nUsage: $name(string,from_chars,to_chars)\n"
 	  }
