@@ -758,13 +758,9 @@ sub claim_search_win {
       @query_nodes=@orig_nodes;
       %orig2query = map { $_ => $_ } @orig_nodes;
     } elsif ($self->{parent_query}) {
-      $roots = Tree_Query::BtredPlanner::plan(
-	\@orig_nodes,
-	$query_tree->parent,
-	$query_tree
-       );
       %orig2query = map { $_ => $_ } @orig_nodes;
       @query_nodes=Tree_Query::FilterQueryNodes($query_tree); # reordered
+      $roots = [$query_tree];
     } else {
       if ($clone_before_plan) {
 	$query_tree=FSFormat->clone_subtree($query_tree);
@@ -773,6 +769,16 @@ sub claim_search_win {
       %orig2query = map { $orig_nodes[$_] => $query_nodes[$_] } 0..$#orig_nodes;
       Tree_Query::BtredPlanner::name_all_query_nodes($query_tree); # need for planning
       $roots = Tree_Query::BtredPlanner::plan(\@query_nodes,$query_tree);
+      for my $subquery (grep { $_->{'#name'} eq 'subtree' } $query_tree->root->descendants) {
+	my $subquery_roots = Tree_Query::BtredPlanner::plan(
+	  [Tree_Query::FilterQueryNodes($subquery)],
+	  $subquery->parent,
+	  $subquery
+	 );
+	if (@$subquery_roots>1) {
+	  die "A subquery is not connected: the sub-graph has more than one root node: ".Tree_Query::Commmon::as_text($subquery)."\n";
+	}
+      }
       @query_nodes=Tree_Query::FilterQueryNodes($query_tree); # reordered
     }
     my $query_node;
@@ -796,6 +802,7 @@ sub claim_search_win {
 
     {
       my @all_query_nodes = grep {$_->{'#name'} =~ /^(node|subquery)$/ } ($query_node->root->descendants);
+      print STDERR map { "$all_query_nodes[$_]{name} => $_\n" } 0..$#all_query_nodes if $DEBUG > 3;
       {
 	my %node2match_pos = map { $all_query_nodes[$_] => $_ } 0..$#all_query_nodes;
 	$self->{pos2match_pos} = [
@@ -807,6 +814,15 @@ sub claim_search_win {
 	($self->{parent_query} ? (%{$self->{parent_query}{name2match_pos}}) : ()),
 	map { $_ => $self->{pos2match_pos}[$name2pos{$_}] } keys %name2pos
       };
+
+      if ($DEBUG>3) {
+	use Data::Dumper;
+	print STDERR Dumper({
+	  parent_query_map => 
+	    ($self->{parent_query} ? $self->{parent_query}{name2match_pos} : undef),
+	  our_map => $self->{name2match_pos},
+	});
+      }
 
       my %node_types = map { $_=> 1 } @{$self->{type_mapper}->get_node_types};
       my $default_type = $query_node->root->{'node-type'};
@@ -1580,7 +1596,7 @@ sub claim_search_win {
     my @aggregations_exp;
     my @aggregations_columns;
     my @aggregations_vars;
-    my @aggregations = sort { $a->[0] <=> $a->[1] } values %aggregations;
+    my @aggregations = sort { $a->[0] <=> $b->[0] } values %aggregations;
     if (@aggregations) {
       @aggregations_exp = map {
 	my $agg_no = $_->[0]; #no
@@ -2116,7 +2132,8 @@ sub claim_search_win {
       .(defined($optional) ? $optional.'==$node or ' : '')
       .'!exists($have{$node}))';
     my $type_name = quotemeta($qnode->{'node-type'});
-    my $sub = qq(#line 1 "query-node/${match_pos}"\n)
+    my $id=$qnode->{'name'} || '';
+    my $sub = qq(#line 1 "query-node/${match_pos}/$id"\n)
       . 'sub { my ($node,$fsfile,$backref)=@_; '."\n  "
        .$nodetest
        .(defined($type_name) && length($type_name) ? "\n and ".q[$node->type->get_decl_path =~ m{^\!].$type_name.q[(?:\.type)?$}] : ())
@@ -2360,7 +2377,9 @@ sub claim_search_win {
       }
       my $target_pos = $self->{name2pos}{$target};
       my $target_match_pos = $self->{name2match_pos}{$target};
-      my $condition = q/ do{ my ($start,$end)=($node,$matched_nodes->[/.$target_match_pos.q/]); /.$expression.q/ } /;
+      my $condition = q/ do{
+                              my ($start,$end)=($node,$matched_nodes->[/.$target_match_pos.q/]); # /.qq{$target (p:$target_pos/m:$target_match_pos)} .q/
+                       /.$expression.q/ } /;
       if (defined $target_pos) {
 	# target node in the same sub-query
 	if ($target_pos<$pos) {
@@ -2790,13 +2809,14 @@ sub claim_search_win {
 	$pt=q{'}.$pt.q{'};
       } elsif ($pt=~s/^\$//) {	# a plain variable
 	if ($pt eq '$') {
-	  my $ret = $self->serialize_target($this_node_id,$opts);
+	  my ($ret_node,$ret_file) = $self->serialize_target2($pt,$opts);
 	  if ($opts->{output_filter}) {
 	    die "Cannot use node reference '$$' at this point of an output filter: '$opts->{expression}'\n"
 	      if defined($opts->{column_count});
+	    my $ret = qq{TredMacro::ThisAddress($ret_node,$ret_file)};
 	    return $self->serialize_column_node_ref($ret,$opts);
 	  } else {
-	    return $ret;
+	    return $ret_node;
 	  }
 	} elsif ($pt =~ /^[1-9][0-9]*$/) { #column reference
 	  die "Column reference \$$pt can only be used in an output filter; error in expression '$opts->{expression}' of node '$this_node_id'\n"
@@ -2810,13 +2830,14 @@ sub claim_search_win {
 	  $opts->{vars_used}{$var}=1;
 	  return $var;
 	} else {
-	  my $ret = $self->serialize_target($pt,$opts);
+	  my ($ret_node,$ret_file) = $self->serialize_target2($pt,$opts);
 	  if ($opts->{output_filter}) {
 	    die "Cannot use node reference '$pt' at this point of an output filter: '$opts->{expression}'\n"
 	      if defined($opts->{column_count});
+	    my $ret = qq{TredMacro::ThisAddress($ret_node,$ret_file)};
 	    return $self->serialize_column_node_ref($ret,$opts);
 	  } else {
-	    return $ret;
+	    return $ret_node;
 	  }
 	}
       } else {			# unrecognized token
