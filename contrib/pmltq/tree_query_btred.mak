@@ -3197,6 +3197,7 @@ sub claim_search_win {
     }
     my $last_ref=0;
     my @roots;
+    my %w;
     for my $i (0..$#$query_nodes) {
       my $qn = $query_nodes->[$i];
       my $p=undef;
@@ -3206,7 +3207,8 @@ sub claim_search_win {
       } else {
 	my ($e) = $mst->edges_to($i);
 	$p=$e->[0];
-	$qn->paste_on($query_nodes->[$p]);
+	$qn->{'.edge_weight'}=$mst->get_edge_weight($e->[0],$e->[1]);
+	$qn->paste_on($query_nodes->[$p],'.edge_weight');
       }
 
       # now turn the selected extra-relation into relation
