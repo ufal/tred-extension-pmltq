@@ -11,7 +11,7 @@ BEGIN {
 
 our $DEBUG;
 #ifdef TRED
-$DEBUG=1;
+$DEBUG=3;
 #endif
 
 my $evaluator;
@@ -1398,22 +1398,22 @@ sub claim_search_win {
     my $is_first_filter = defined($opts->{column_count}) ? 0 : 1;
     my $distinct = $filter->{distinct} || 0;
 
-    my @foreach;
+    my $Foreach = $opts->{foreach} || [];
     my $foreach_idx = 0;
-    my @input_columns;
+    my $input_columns = $opts->{input_columns} || [];
+    my $return_columns = $opts->{columns_used} || {};
 
     my %aggregations;
     my %return_aggregations;
-    my %return_columns;
     my @return_vars;
     my @return_exp = do {
       my $i = 0;
       map $self->serialize_column($_, {
 	%$opts,
 	var_prefix => 'v',
-	foreach => ($is_first_filter && !@group_by ? \@foreach : undef),
-	input_columns => ($is_first_filter && !@group_by ? \@input_columns : undef),
-	columns_used => \%return_columns,
+	foreach => ($is_first_filter && !@group_by ? $Foreach : undef),
+	input_columns => ($is_first_filter && !@group_by ? $input_columns : undef),
+	columns_used => $return_columns,
 	vars_used => ($return_vars[$i++]={}),
         local_aggregations => \%return_aggregations,
 	old_aggregations => $opts->{aggregations},
@@ -1458,7 +1458,7 @@ sub claim_search_win {
       my $agg_filter = {
 	'group-by' => $filter->{'group-by'},
 	'return' => Fslib::List->new(
-	  (map '$'.$_, sort keys(%return_columns)),
+	  (map '$'.$_, sort keys(%$return_columns)),
 	  # these we pass in parsed
 	  (map [ 'ANALYTIC_FUNC',
 		 $_->[1], # name
@@ -1513,8 +1513,8 @@ sub claim_search_win {
 	%$opts,
 	var_prefix => 'g',
 	columns_used => \%group_columns,
-	foreach => ($is_first_filter ? \@foreach : undef),
-	input_columns => ($is_first_filter ? \@input_columns : undef),
+	foreach => ($is_first_filter ? $Foreach : undef),
+	input_columns => ($is_first_filter ? $input_columns : undef),
 	vars_used => ($group_vars[$i++]={}),
         local_aggregations => undef, # not applicable
 	aggregations => undef, # not applicable
@@ -1542,8 +1542,10 @@ sub claim_search_win {
 	  over_exp => $over_exp,
 	  vars_used => $vars_used,
 	  column_count => $column_count,
+	  input_columns => $input_columns,
 	});
       }
+
       my @f =
 	$self->serialize_filter(
 	  {
@@ -1563,9 +1565,12 @@ sub claim_search_win {
 	  {
 	    column_types => $opts->{column_types},
 	    filter_id => $opts->{filter_id}.'_local_'.$num,
+	    is_local_filter => 1,
 	    is_first_filter => $is_first_filter,
+	    input_columns => ($is_first_filter ? $input_columns : undef),
+	    foreach => ($is_first_filter ? $Foreach : undef),
 	    old_aggregations => \%old_aggregations,
-	    old_aggregations_first_column => scalar(keys(%return_columns)),
+	    old_aggregations_first_column => scalar(keys(%$return_columns)),
 	    column_count => $column_count,
 	    code_map_flags => {
 	      RETURN => 1,
@@ -1607,8 +1612,8 @@ sub claim_search_win {
 	     %$opts,
 	     var_prefix => 'v',
 	     columns_used => ($aggregations_columns[$agg_no]||={}),
-	     foreach => ($is_first_filter ? \@foreach : undef),
-	     input_columns => ($is_first_filter ? \@input_columns : undef),
+	     foreach => ($is_first_filter ? $Foreach : undef),
+	     input_columns => ($is_first_filter ? $input_columns : undef),
 	     vars_used => ($aggregations_vars[$agg_no][$col_no++]={}),
 	     local_aggregations => undef,
 	     aggregations => $opts->{aggregations}, # not applicable
@@ -1624,8 +1629,8 @@ sub claim_search_win {
 	       %$opts,
 	       var_prefix => 'v',
 	       columns_used => ($aggregations_columns[$agg_no]||={}),
-	       foreach => ($is_first_filter ? \@foreach : undef),
-	       input_columns => ($is_first_filter ? \@input_columns : undef),
+	       foreach => ($is_first_filter ? $Foreach : undef),
+	       input_columns => ($is_first_filter ? $input_columns : undef),
 	       vars_used => ($aggregations_vars[$agg_no][$col_no++]={}),
 	       local_aggregations => undef,
 	       aggregations => $opts->{aggregations}, # not applicable
@@ -1669,17 +1674,18 @@ sub claim_search_win {
     if ($DEBUG>2) {
       use Data::Dumper;
       print STDERR Dumper({
-	foreach => \@foreach,
+	foreach => $Foreach,
 	aggregations => \@aggregations_exp,
 	return_exp => \@return_exp,
 	return_agg => \%return_aggregations,
 	group_by_exp => \@group_by_exp,
 	sort_by_exp => \@sort_by_exp,
 	colum_types => $opts->{column_types},
+	input_columns => $input_columns,
       });
     }
 
-    my @columns_used = uniq(sort keys(%return_columns));
+    my @columns_used = uniq(sort keys(%$return_columns));
     my @g_columns_used = uniq(sort keys(%group_columns));
     
     # In case we moved aggregations to a separate filter
@@ -1693,7 +1699,7 @@ sub claim_search_win {
     my $varlist = join(',', (map '$v'.$_, @columns_used),
 		            (map '$a'.$_, 0..($old_aggregation_count-1))
 		      );
-    my $colnums = 
+    my $colnums =
       $old_aggregation_count
 	? join(',', 0..($#columns_used+$old_aggregation_count))
 	: join(',', map $_-1, @columns_used);
@@ -1845,16 +1851,17 @@ sub claim_search_win {
     $output_filter->{code}=$code;
 
     # filter_init:
-    if ($is_first_filter) {
+    if ($is_first_filter and !$opts->{is_local_filter}) {
       my $code = q`
          $first_filter->{process_row}->($first_filter, [
            _RET_COLS_
          ]);
       `;
+
       # no substitutions past this point!
       _code_substitute($code,
 		       {
-			 _RET_COLS_ => join (",\n           ",@input_columns),
+			 _RET_COLS_ => join (",\n           ",@$input_columns),
 		       }
 		      );
       # now we simulate a left join
@@ -1866,11 +1873,12 @@ sub claim_search_win {
 	my @wrap_r=([0,'}']);
 	my $i=0;
 	my $indent=0;
-	foreach my $f (@foreach) { # he?
+	foreach my $f (@$Foreach) { # he?
+	  my $prev_var='$var'.($i-1);
 	  if ($f->[0]==1) {
 	    push @wrap_l,
 	      [$indent,
-	       ($i && $f=~'$var'.($i-1)) ? qq`my \@var$i = defined(\$var`.($i-1).qq`) ? $f->[1] : ();` :
+	       ($i && $f->[1]=~/\Q$prev_var\E/) ? qq`my \@var$i = defined(\$var`.($i-1).qq`) ? $f->[1] : ();` :
 		 qq`my \@var$i = $f->[1];`
 		],
 	      [$indent,qq`foreach my \$var$i (\@var$i ? \@var$i : (undef)) {`];
@@ -1878,7 +1886,7 @@ sub claim_search_win {
 	    $indent++;
 	  } elsif ($f->[0]==0) {
 	    push @wrap_l, [$indent,
-			   ($i && $f=~'$var'.($i-1)) ? qq`my \$var$i = defined(\$var`.($i-1).qq`) ? $f->[1] : undef;` :
+			   ($i && $f->[1]=~/\Q$prev_var\E/) ? qq`my \$var$i = defined(\$var`.($i-1).qq`) ? $f->[1] : undef;` :
 			     qq`my \$var$i = $f->[1];`];
 	  }
 	  $i ++;
@@ -1922,6 +1930,7 @@ sub claim_search_win {
 	my $i = -1;
 	print STDERR sprintf("%3s\t%s",$i++,$_."\n") for split /\n/,$sort_code;
       }
+
       $output_filter = eval $sort_code; die $@ if $@;
       $output_filter->{code}=$sort_code;
       push @compiled_filters, $output_filter;
@@ -2597,6 +2606,8 @@ sub claim_search_win {
 		   columns_used => $opts->{columns_used},
 		   aggregations => $opts->{aggregations},
 		   is_first_filter => $opts->{is_first_filter},
+		   foreach => $opts->{foreach},
+		   input_columns => $opts->{input_columns},
 		   vars_used => ($vars[$i][$j++]={}),
 		   local_aggregations => undef,
 		 })} @{$_||[]}
@@ -2687,16 +2698,24 @@ sub claim_search_win {
 	    $ref = $this_node_id;
 	  }
 	  my ($target,$file) = $self->serialize_target2($ref,$opts);
+	  my $ret;
 	  if ($name eq 'file') {
-	    return qq{$file->filename}
+	    $ret = qq{$file->filename}
 	  } else {
 	    if ($name eq 'tree_no') {
-	      return qq{Fslib::Index($file->treeList,$target->root};
+	      $ret= qq{Fslib::Index($file->treeList,$target->root};
 	    } elsif ($name eq 'address') {
-	      return qq{TredMacro::ThisAddress($target,$file)};
+	      $ret= qq{TredMacro::ThisAddress($target,$file)};
 	    } else {
 	      die "Function ${name}() not yet implemented!\n";
 	    }
+	  }
+	  if ($opts->{output_filter}) {
+	    die "Cannot use function '$name' at this point of an output filter: '$opts->{expression}'\n"
+	      if defined($opts->{column_count});
+	    return $self->serialize_column_node_ref($ret,$opts);
+	  } else {
+	    return $ret;
 	  }
 	} elsif ($name=~/^(?:lower|upper|length|abs|floor|ceil)$/) {
 	  if ($args and @$args==1) {
