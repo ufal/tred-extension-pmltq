@@ -10,6 +10,8 @@ BEGIN {
 }
 
 our $DEBUG;
+our $ORDER_SIBLINGS=1;
+our $ALL_SUBQUERIES_LAST=1;
 #ifdef TRED
 $DEBUG=3;
 #endif
@@ -2287,7 +2289,9 @@ sub claim_search_win {
 	    .','.join(',',(map { defined($_) ? $_ : 'undef' } @occ));
       my $condition = q`(($backref or $matched_nodes->[`.$match_pos.q`]=$node) and `. # trick: the subquery may ask about the current node
 	qq/\$sub_queries[$sq_pos]->test_occurrences(\$node,$occ_list))/;
-      my $postpone_subquery_till = $subquery->{postpone_subquery_till};
+      my $postpone_subquery_till = 
+	($ALL_SUBQUERIES_LAST) ? scalar(@{$self->{pos2match_pos}}) :
+	$subquery->{postpone_subquery_till};
       if (defined $postpone_subquery_till) {
 	print STDERR "postponing subquery till: $postpone_subquery_till\n" if $DEBUG;
 	my $target_pos = TredMacro::Index($self->{pos2match_pos},$postpone_subquery_till);
@@ -3207,8 +3211,12 @@ sub claim_search_win {
       } else {
 	my ($e) = $mst->edges_to($i);
 	$p=$e->[0];
-	$qn->{'.edge_weight'}=$mst->get_edge_weight($e->[0],$e->[1]);
-	$qn->paste_on($query_nodes->[$p],'.edge_weight');
+	if ($ORDER_SIBLINGS) {
+	  $qn->{'.edge_weight'}=$mst->get_edge_weight($e->[0],$e->[1]);
+	  $qn->paste_on($query_nodes->[$p],'.edge_weight');
+	} else {
+	  $qn->paste_on($query_nodes->[$p]);
+	}
       }
 
       # now turn the selected extra-relation into relation
