@@ -1059,10 +1059,10 @@ my %arrow = (
 # TODO: allow these colors to be defined by user
 my %color = (
   'child' => 'black',
-  'parent' => 'lightgray',
+  'parent' => '#779',
   'descendant' => 'blue',
   'ancestor' => 'lightblue',
-  'same-tree-as' => 'gray',
+  'same-tree-as' => '#eea',
   'depth-first-precedes' => 'red3',
   'depth-first-follows' => 'red4',
   'order-precedes' => 'orange',
