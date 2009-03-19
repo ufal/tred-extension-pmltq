@@ -11,7 +11,7 @@ BEGIN {
 
 our $DEBUG;
 our $ORDER_SIBLINGS=1;
-our $ALL_SUBQUERIES_LAST=1;
+our $ALL_SUBQUERIES_LAST=0;
 #ifdef TRED
 $DEBUG=3;
 #endif
@@ -2289,9 +2289,11 @@ sub claim_search_win {
 	    .','.join(',',(map { defined($_) ? $_ : 'undef' } @occ));
       my $condition = q`(($backref or $matched_nodes->[`.$match_pos.q`]=$node) and `. # trick: the subquery may ask about the current node
 	qq/\$sub_queries[$sq_pos]->test_occurrences(\$node,$occ_list))/;
-      my $postpone_subquery_till = 
-	($ALL_SUBQUERIES_LAST) ? scalar(@{$self->{pos2match_pos}}) :
-	$subquery->{postpone_subquery_till};
+      my $postpone_subquery_till = $subquery->{postpone_subquery_till};
+      if (!defined $postpone_subquery_till or $ALL_SUBQUERIES_LAST) {
+	$postpone_subquery_till = $self->{pos2match_pos}[-1];
+	print STDERR "ALL_SUBQUERIES_LAST used\n" if $DEBUG;
+      }
       if (defined $postpone_subquery_till) {
 	print STDERR "postponing subquery till: $postpone_subquery_till\n" if $DEBUG;
 	my $target_pos = TredMacro::Index($self->{pos2match_pos},$postpone_subquery_till);
