@@ -630,14 +630,13 @@ sub claim_search_win {
   use strict;
   use Scalar::Util qw(weaken);
   use List::Util qw(first);
-  import TredMacro qw(SeqV uniq);
   use PMLSchema;
   use POSIX qw(ceil floor);
-  use constant {
-    COL_UNKNOWN => 0,
-    COL_STRING  => 1,
-    COL_NUMERIC => 2,
-  };
+
+  BEGIN {
+    import TredMacro qw(SeqV uniq);
+    import Tree_Query::Common qw(:constants compute_column_data_type);
+  }
 
   sub round {
     my ($num, $digits)=@_;
@@ -910,6 +909,17 @@ sub claim_search_win {
       }
     }
     return $self;
+  }
+
+  sub type_mapper {
+    my ($self)=@_;
+    return $self->{type_mapper};
+  }
+
+  sub get_type_decl_for_node {
+    my ($self,$name)=@_;
+    my $node_type = $self->{name2type}{$name};
+    return $node_type && $self->{type_mapper}->get_decl_for($node_type);
   }
 
   sub get_results {
@@ -1955,127 +1965,6 @@ sub claim_search_win {
 	    } @$expressions);
   }
 
-  # returns:
-  #  COL_NUMERIC for numeric type
-  #  COL_STRING for string type
-  #  COL_UNKNOWN for any other type
-  sub compute_column_data_type {
-    my ($self,$column,$opts)=@_;
-    $opts||={};
-    my $pt;
-    if (ref($column)) {
-      $pt = $column;
-    } else {
-      # column is a PT:
-      $pt = Tree_Query::parse_column_expression($column); # $pt stands for parse tree
-      die "Invalid column expression '$column'" unless defined $pt;
-    }
-    $self->compute_column_data_type_pt($pt,$opts);
-  }
-
-  sub compute_column_data_type_pt {
-    my ($self,$pt,$opts)=@_;
-    if (ref $pt) {
-      my ($type) = @$pt;
-      if ($type eq 'EVERY') {
-	return $self->compute_column_data_type_pt($pt->[1],$opts);
-      } elsif ($type eq 'ATTR' or $type eq 'REF_ATTR') {
-	my $node_type;
-	if ($type eq 'REF_ATTR') {
-	  my $target = lc($pt->[1]);
-	  $pt=$pt->[2];
-	  $node_type = $self->{name2type}{$target};
-	} else {
-	  $node_type = $opts->{type};
-	}
-	my $attr=join('/',@{$pt}[1..$#$pt]);
-	$attr=~s{\[\]}{#content}g;
-	$attr=~s{/\[[^\]]*\]}{}g;
-	my $node_type_decl = $self->{type_mapper}->get_decl_for($node_type);
-	my $decl = $node_type_decl->find($attr);
-	my $decl_is = $decl->get_decl_type;
-	while ($decl and
-		 ($decl_is == PML_LIST_DECL or
-		    $decl_is == PML_ALT_DECL or
-		      $decl_is == PML_MEMBER_DECL or
-			$decl_is == PML_ELEMENT_DECL)) {
-	  $decl  = $decl->get_content_decl;
-	  $decl_is = $decl->get_decl_type;
-	}
-	if ($decl and $decl->is_atomic) {
-	  if ($decl_is == PML_CHOICE_DECL or
-		$decl_is == PML_CONSTANT_DECL) {
-	    my @values = $decl->get_values;
-	    if (@values and !grep { !/^(?:0|-?[^1-9][0-9]*(?:\.[0-9]*[1-9]))$/ } @values) {
-	      return COL_NUMERIC;
-	    } else {
-	      return COL_STRING;
-	    }
-	  } else {
-	    my $format = $decl->get_format;
-	    if ($format =~ /(integer$|int$|short$|byte|long|decimal$|float$|double$)/i) {
-	      return COL_NUMERIC;
-	    } else {
-	      return COL_STRING;
-	    }
-	  }
-	} else {
-	  return COL_UNKNOWN;
-	}
-      } elsif ($type eq 'ANALYTIC_FUNC') {
-	if ($pt->[1] eq 'concat') {
-	  return COL_STRING;
-	} else {
-	  return COL_NUMERIC;
-	}
-      } elsif ($type eq 'FUNC') {
-	my $name = $pt->[1];
-	if ($name=~/^(?:descendants|lbrothers|rbrothers|sons|depth|length|abs|floor|ceil|round|trunc|percnt)$/) {
-	  return COL_NUMERIC;
-	} else {
-	  return COL_STRING;
-	}
-      } elsif ($type eq 'EXP') {
-	my @exp = @$pt;
-	shift @exp;		# shift EXP
-	return $self->compute_column_data_type_pt($exp[0],$opts) if @exp==1;
-	my $lowest_precedence;
-	my $last_lowest_precedence_op;
-	while (@exp) {
-	  shift @exp;		# shift an operand
-	  if (@exp) {
-	    my $op = shift @exp;
-	    my $precedence =$Tree_Query::Common::operator_precedence{$op};
-	    if (!defined($lowest_precedence) or $precedence<=$lowest_precedence) {
-	      $last_lowest_precedence_op = $op;
-	      $lowest_precedence = $precedence;
-	    }
-	  }
-	}
-	if ($last_lowest_precedence_op eq '&') {
-	  return COL_STRING;
-	} else {
-	  return COL_NUMERIC;
-	}
-      }
-    } else {
-      if ($pt=~/^[-0-9]/) {  # literal number
-	return COL_NUMERIC;
-      } elsif ($pt=~/^['"]/) {  # literal string
-	return COL_STRING;
-      } elsif ($pt=~/^\$/) {
-	my $var = $pt; $var=~s/^\$//;
-	if ($var =~ /^[1-9][0-9]*$/) {
-	  return $opts->{column_types}[$var - 1];
-	} else {
-	  return COL_UNKNOWN;
-	}
-      } else {
-	confess( "Unrecognized sub-expression: $pt\n" );
-      }
-    }
-  }
-
   sub serialize_column {
     my ($self,$column,$opts)=@_;
     $opts||={};
@@ -2329,7 +2218,7 @@ sub claim_search_win {
 		name => 'test',
 		condition => {
 		  '#name' => 'test',
-		  a => '$'.$target.'.id',
+		  a => 'id($'.$target.')',
 		  b => $label,
 		  operator => '=',
 		},
@@ -2694,7 +2583,7 @@ sub claim_search_win {
 	  } else {
 	    return $ret;
 	  }
-	} elsif ($name =~ /^(file|tree_no|address)$/) {
+	} elsif ($name =~ /^(file|tree_no|address|id)$/) {
 	  my $ref;
 	  if ($args and @$args) {
 	    $ref = $args->[0];
@@ -2706,9 +2595,17 @@ sub claim_search_win {
 	  my ($target,$file) = $self->serialize_target2($ref,$opts);
 	  my $ret;
 	  if ($name eq 'file') {
-	    $ret = qq{$file->filename}
+	    $ret = qq{$file->filename};
 	  } else {
-	    if ($name eq 'tree_no') {
+	    if ($name eq 'id') {
+	      my $decl = $self->{type_mapper}->get_decl_for( $self->{name2type}{$ref} );
+	      if ($decl->get_decl_type == PML_ELEMENT_DECL) {
+		$decl = $decl->get_content_decl;
+	      }
+	      my ($m)=$decl->find_members_by_role('#ID');
+	      my $id_attr = defined($m) && $m->get_name;
+	      $ret= defined $id_attr ? $target.qq{->{q($id_attr)}} : 'undef';
+	    } elsif ($name eq 'tree_no') {
 	      $ret= qq{Fslib::Index($file->treeList,$target->root};
 	    } elsif ($name eq 'address') {
 	      $ret= qq{TredMacro::ThisAddress($target,$file)};
@@ -3083,7 +2980,7 @@ sub claim_search_win {
     }
     my $w = $weight{$name};
     return $w if defined $w;
-    warn "do not have weight for edge: '$name'; assuming 5\n";
+    # warn "do not have weight for edge: '$name'; assuming 5\n";
     return 5;
   }
   sub reversed_rel {
@@ -3893,8 +3790,7 @@ sub claim_search_win {
     my $fsfile = $self->[SimpleListIterator::FILE];
     return [map {
       my $id = $_;
-      $id=~s/^(.*)?#//;
-      if ($1) {
+      if ($id=~s{^(.*)?#}{} and defined($1) and length($1)) {
 	my $ref_fs = $fsfile->appData('ref')->{$1};
 	my $n = $ref_fs && PML::GetNodeByID($id,$ref_fs);
 	$ref_fs && $n ? [$n, $ref_fs] : ();
