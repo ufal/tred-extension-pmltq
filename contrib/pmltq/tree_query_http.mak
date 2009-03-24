@@ -451,7 +451,7 @@ sub init {
   my $cfgs = $self->{config}{pml}->get_root->{configurations};
   my $cfg_type = $self->{config}{type};
   if (!$id) {
-    my @opts = ((map { $_->{id} } map $_->value, grep $_->name eq 'http', SeqV($cfgs)),' CREATE NEW CONNECTION ');
+    my @opts = ((map { $_->{id} } map $_->value, grep $_->name eq 'http', SeqV($cfgs)));
     my @sel= $configuration ? $configuration->{id} : @opts ? $opts[0] : ();
     ListQuery('Select connection',
 			 'browse',
@@ -459,26 +459,97 @@ sub init {
 			 \@sel,
 	      {
 		label => { -text=> qq{Select from previously configured server connections\nor create a new one.} },
+		buttons => [
+		  {
+		    -text => 'New',
+		    -command => [sub {
+				   my $l = pop @_;
+				   my $cfg = Fslib::Struct->new();
+				   edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
+				   $cfgs->push_element('http',$cfg);
+				   $self->{config}{pml}->save();
+				   $l->insert('end',$cfg->{id});
+				   $l->see('end');
+				   $l->selectionClear(0,'end');
+				   $l->activate('end');
+				   $l->selectionSet('end');
+				 }],
+		  },
+		  {
+		    -text => 'Clone',
+		    -command => [sub {
+				   my $l = pop @_;
+				   my $id = $l->get('active');
+				   return unless $id;
+				   my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
+				   return unless $cfg;
+				   $cfg = Fslib::CloneValue($cfg);
+				   $cfg->{id}=undef;
+				   edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
+				   $cfgs->push_element('http',$cfg);
+				   $self->{config}{pml}->save();
+				   $l->insert('end',$cfg->{id});
+				   $l->see('end');
+				   $l->selectionClear(0,'end');
+				   $l->activate('end');
+				   $l->selectionSet('end');
+				 }],
+		  },
+		  {
+		    -text => 'Edit',
+		    -command => [sub {
+				   my $l = pop @_;
+				   my $id = $l->get('active');
+				   if ($id) {
+				     my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
+				     edit_config('Edit connection',$cfg,$cfg_type,'url') || return;
+				     $self->{config}{pml}->save();
+				     if ($cfg->{id} ne $id) {
+				       $l->insert('active',$cfg->{id});
+				       $l->delete('active');
+				     }
+				   }
+				 }],
+		  },
+		  {
+		    -text => 'Remove',
+		    -command => [sub {
+				   my $l = pop @_;
+				   my $id = $l->get('active');
+				   if ($id and
+				       QuestionQuery('Delete connection',
+						     qq{Really delete connection '$id'?},
+						     'Delete','Cancel') eq 'Delete') {
+				     $l->delete('active');
+				     my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
+				     if ($cfg) {
+				       $cfgs->delete_value($cfg);
+				       $self->{config}{pml}->save();
+				     }
+				   }
+				 }],
+		  },
+		 ],
 	      }
 	     ) || return;
     ($id) = @sel;
   }
   return unless $id;
   my $cfg;
-  if ($id eq ' CREATE NEW CONNECTION ') {
-    $cfg = Fslib::Struct->new();
-    GUI() && edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
-    $cfgs->push_element('http',$cfg);
-    $self->{config}{pml}->save();
-    $id = $cfg->{id};
-  } else {
+#   if ($id eq ' CREATE NEW CONNECTION ') {
+#     $cfg = Fslib::Struct->new();
+#     GUI() && edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
+#     $cfgs->push_element('http',$cfg);
+#     $self->{config}{pml}->save();
+#     $id = $cfg->{id};
+#   } else {
     $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
     die "Didn't find configuration '$id'" unless $cfg;
-  }
+#  }
   $self->{config}{id} = $id;
   unless (defined $cfg->{url}) {
     if (GUI()) {
-      edit_config('Edit connection',$cfg,$cfg_type,'password') || return;
+      edit_config('Edit connection',$cfg,$cfg_type,'url') || return;
     } else {
       die "The configuration $id does not specify a URL\n";
     }

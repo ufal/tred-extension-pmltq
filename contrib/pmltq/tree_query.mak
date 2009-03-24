@@ -352,7 +352,6 @@ my @TOOLBAR_BINDINGS = (
     menu => 'Insert a new node between the current node and its parent',
     toolbar => ['Parent', 'new_parent' ],
   },
-
  );
 
 DeclareMinorMode 'Tree_Query_Results' => {
@@ -571,9 +570,10 @@ sub pre_switch_context_hook {
   if (first { $win!=$_ and CurrentContextForWindow($_) eq 'Tree_Query' } TrEdWindows()) {
     DisableUserToolbar('Tree_Query');
   } else {
-    HideUserToolbar('Tree_Query');
+    DestroyUserToolbar('Tree_Query');
   }
 }
+
 # Setup stylesheet
 sub switch_context_hook {
  my ($prev,$new)=@_;
@@ -583,9 +583,9 @@ sub switch_context_hook {
 
  if (exists &GetUserToolbar) {
  if (GetUserToolbar('Tree_Query')) {
-   unless (UserToolbarVisible('Tree_Query')) {
-     ShowUserToolbar('Tree_Query');
-   }
+#    unless (UserToolbarVisible('Tree_Query')) {
+#      ShowUserToolbar('Tree_Query');
+#    }
    EnableUserToolbar('Tree_Query');
  } else {
    my $tb = NewUserToolbar('Tree_Query');
