@@ -144,10 +144,16 @@ my @TOOLBAR_BINDINGS = (
     toolbar => ['Copy', 'editcopy'],
   },
   {
-    command => sub { paste_from_clipboad(); copy_to_clipboad() },
+    command => sub { PasteClipboardWithRename(); copy_to_clipboad() },
     key => 'Shift+Insert',
     menu => 'Paste subtree from clipboard',
     toolbar => ['Paste', 'editpaste'],
+  },
+  {
+    command => 'paste_as_new_tree',
+    key => 'Ctrl+Shift+Insert',
+    menu => 'Paste as new tree',
+    toolbar => ['Paste New Tree', 'editpaste'],
   },
   '---',
   {
@@ -220,10 +226,34 @@ my @TOOLBAR_BINDINGS = (
     command => sub {
       ChangingFile(0);
       return unless $this->{'#name'}=~/^(?:node|subquery)$/;
-      EditAttribute($this,'name') && ChangingFile(1);
+      my $prev_name = $this->{name};
+      $this->{name} = GetNodeName($this);
+      EDIT: while (EditAttribute($this,'name')) {
+	if ($this->{name}) {
+	  my $n = $root->firstson;
+	  while ($n) {
+	    if ($n!=$this and 
+		  $n->{'#name'} =~ /^(node|subquery)$/ and
+		    $n->{name} eq $this->{name}) {
+	      QuestionQuery("Wrong name",
+			    "Name $this->{name} is already taken!",
+			    "Edit name","Cancel");
+	      $this->{name} = $prev_name;
+	      next EDIT;
+	    }
+	    $n = $n->following;
+	  }
+	}
+	ChangingFile(1);
+	if ($prev_name and $this->{name} ne $prev_name) {
+	  RenameNode($this,$prev_name);
+	}
+	return;
+      }
+      $this->{name} = $prev_name;
     },
     key => '$',
-    menu => 'Edit node name',
+    menu => 'Change node name',
     toolbar => ['Name','name_node' ],
   },
   {
@@ -343,11 +373,17 @@ my @TOOLBAR_BINDINGS = (
   },
 
   {
-    command =>  sub { my $new = new_parent();
-		      if ($new and $new->{'#name'} =~ /^(node|subquery)$/) {
-			( $new->parent ? AssignRelation($new) : AssignType($new) ) || DeleteLeafNode($new);
-		      }
-		    },
+    command =>  sub {
+      my $child = $this;
+      return unless $child->parent;
+      my $new = new_parent($child);
+      if ($new and $new->{'#name'} =~ /^(node|subquery)$/) {
+	$new->{relation} = $child->{relation};
+	undef $child->{relation};
+	AssignType($new);
+	AssignRelation($child);
+      }
+    },
     key => 'Alt+Up',
     menu => 'Insert a new node between the current node and its parent',
     toolbar => ['Parent', 'new_parent' ],
@@ -438,11 +474,6 @@ Bind AddAND => {
 Bind AddOR => {
   key => 'o',
   menu => 'Add OR condition',
-};
-
-Bind paste_as_new_tree => {
-  key => 'Ctrl+Shift+Insert',
-  menu => 'Paste as new tree',
 };
 
 Bind sub {
@@ -558,6 +589,12 @@ sub icon {
 sub allow_switch_context_hook {
   return 'stop' if SchemaName() ne 'tree_query';
 }
+
+#ifdef TRED
+sub macros_reloaded_hook {
+  switch_context_hook(__PACKAGE__,__PACKAGE__); # renew toolbar
+}
+#endif
 
 sub get_status_line_hook {
   return 'To create an additional edge (relation), drag a start node over the target node using mouse and hold CTRL before releasing.';
@@ -908,7 +945,9 @@ sub init_id_map {
   my ($tree,$assign_names)=@_;
   # assign_names == 1 means actually set name for the nodes in the current subquery
   # assign_names == 2 means actually set name for all nodes
+
   my @nodes = grep { $_->{'#name'} =~ /^(?:node|subquery)$/ } $tree->descendants;
+
   my %main_query_nodes;
   if (defined($assign_names) and $assign_names==1) {
     %main_query_nodes;
@@ -940,7 +979,7 @@ sub init_id_map {
 
 sub GetNodeName {
   my ($node)=@_;
-  die "#name!='node'" unless defined($node) and $node->{'#name'} eq 'node';
+  croak(q{GetNodeName: #name!~'^(node|subquery)$'}) unless defined($node) and $node->{'#name'} =~ /^(node|subquery)$/;
   if (defined($node->{name})) {
     return $node->{name}
   } else {
@@ -985,10 +1024,12 @@ sub AssignRelation {
   return unless
     $node and
     $node->parent and ($node->{'#name'} =~ /^(node|subquery)$/ or ($node->{'#name'} eq 'ref' and $node->{target}));
-  my ($rel) = map {
-    $_->name eq 'user-defined' ?
-      $_->value->{label}.' (user-defined)' : $_->name }
-    SeqV($node->{relation});
+  unless ($node->parent->parent) {
+    delete $node->{relation};
+    return 1;
+  }
+
+  my ($rel) = map { _rel_name($_,"%s (%s)") } SeqV($node->{relation});
   my @sel=($rel||'child');
   my $node_type = $node->parent->{'node-type'};
   my $relations =
@@ -1042,6 +1083,61 @@ sub AssignType {
     $node->{'node-type'}=$sel[0];
   }
   return 1;
+}
+
+
+sub PasteClipboardWithRename {
+  my $n = $root;
+  my %names;
+  while ($n) {
+    if ( $n->{'#name'} =~ /^(?:node|subquery)$/ 
+	 and $n->{name} ) {
+      $names{$n->{name}}=$n;
+    }
+    $n=$n->following;
+  }
+
+  $n = $TredMacro::nodeClipboard;
+  while ($n) {
+    if ( $n->{'#name'} =~ /^(?:node|subquery)$/ and $n->{name} ) {
+      my $i = 0;
+      my $name = $n->{name};
+      while (exists $names{$name}) {
+	$name = $n->{name}.'_'.($i++);
+      }
+      RenameNode($n,$n->{name},$name) if $i;
+    }
+    $n = $n->following;
+  }
+  paste_from_clipboad();
+}
+
+sub RenameNode {
+  my ($node, $old_name,$new_name)=@_;
+  if ($new_name) {
+    $node->{name} = $new_name;
+  } else {
+    $new_name = GetNodeName($node);
+  }
+  my $top = $node;
+  # find current scope top
+  if ($top->{'#name'} ne 'subquery') {
+    $top=$top->parent while $top->parent and $top->parent->{'#name'} eq 'node';
+    $top = $top->parent if $top->parent and !$top->parent->parent;
+  }
+  my $n = $top;
+  while ($n) {
+    if ($n->{'#name'} eq 'ref') {
+      $n->{target} = $new_name if $n->{target} eq $old_name;
+    } elsif ($n->{'#name'} eq 'test') {
+      for my $attr (qw(a b)) {
+	$n->{$attr} =~ s{(['](?:[^'\\]+|\\.)*[']|["](?:[^"\\]+|\\.)*["])|\$\Q$old_name\E}{
+	  $1 ? $1 : '$'.$new_name
+	}ge;
+      }
+    }
+    $n=$n->following($top);
+  }
 }
 
 #include "ng.inc"
@@ -1320,7 +1416,12 @@ sub line_click_hook {
 sub node_release_hook {
   my ($node,$target,$mod)=@_;
   return unless $target;
-  print "NODE_RELEASE_HOOK: $mod, $node->{'#name'}, $target->{'#name'}, $node->{optional}\n";
+  #print STDERR "NODE_RELEASE_HOOK: $mod, $node->{'#name'}, $target->{'#name'}, $node->{optional}\n";
+  my $old_parent;
+  if ($node->{'#name'} =~ /^(node|subquery)$/) {
+    $old_parent = $node->parent;
+    $old_parent=$old_parent->parent while ($old_parent and $old_parent->{'#name'} !~ /^(node|subquery)$/);
+  }
   if (defined($mod) and $mod =~ /^(Control|Control-3|-2)$/) {
     if (EditRelationFromTo($node,$target)) {
       TredMacro::Redraw_FSFile_Tree();
@@ -1331,10 +1432,21 @@ sub node_release_hook {
   } elsif (!$mod and $node->{'#name'} eq 'node' and $target->{'#name'} =~ /^(and|or|not)$/ and !$node->{optional}) {
     $this->set_type(undef);
     $node->{'#name'}='subquery';
-    CutPaste($node,$target);
     DetermineNodeType($node);
-    ChangingFile(1);
-    Redraw();
+    if (eval { CutPasteWithRelations($node,$old_parent,$target) }) {
+      Redraw();
+    } else {
+      $this->set_type(undef);
+      $node->{'#name'}='node';
+      DetermineNodeType($node);
+    }
+    warn $@ if $@;
+    return 'stop';
+  } elsif ($node->{'#name'} =~ /^(subquery|node)$/) {
+    if (eval { CutPasteWithRelations($node,$old_parent,$target) }) {
+      Redraw();
+    }
+    warn $@ if $@;
     return 'stop';
   } elsif (!$mod and $target->{'#name'} =~ /^(ref|test)$/) {
     return 'stop';
@@ -1348,7 +1460,233 @@ sub current_node_change_hook {
   return $SEARCH->select_matching_node($node);
 }
 
+############################################################
 # Helper routines
+
+sub _rel_name {
+  my ($rel,$fmt)=@_;
+  ($rel)=SeqV($rel) if ref($rel) eq 'Fslib::Seq';
+  return unless ref $rel;
+  $fmt ||= q{%s:%s};
+  my $rel_name = $rel->name;
+  if ($rel_name eq 'user-defined') {
+    return sprintf($fmt,$rel_name,$rel->value->{label});
+  }
+  return $rel_name;
+}
+
+
+# # convert the main relation to a ref to old_parent
+# # and find a ref to new_parent and use it as the main relation
+sub CutPasteWithRelations {
+  my ($node,$old_parent,$new_parent)=@_;
+
+  if ($old_parent and $old_parent->parent and !$node->{relation}) {
+    SetRelation($node,'child');
+  }
+
+  # find all relations pointing to this node:
+  my @revert;
+  my @delete;
+  for my $ref (grep { $_->{'#name'} eq 'ref' and $_->{'target'} eq $node->{name} } $node->root->descendants) {
+    next unless SeqV($ref->{relation});
+    my $is_reversible = isReversible($ref->{relation});
+    my $ref_node = $ref;
+    my $start = $ref->parent;
+    if ($start->{'#name'} !~ /^(node|subquery)$/) {
+      if ($start->{'#name'} eq 'not'
+	  and !$ref->lbrother and !$ref->rbrother
+	  and $start->parent
+	  and $start->parent->{'#name'} =~ /^(node|subquery)$/
+	 ) {
+	$ref_node = $start;
+	$start = $start->parent;
+      } else {
+	$start=$start->parent while $start and $start->{'#name'} !~ /^(node|subquery)/;
+	$is_reversible=0;
+      }
+    }
+    next unless $start;
+    my $cmp = cmp_subquery_scope($start,$new_parent);
+    if ($cmp<0) {
+      if ($is_reversible) {
+	push @revert,[$ref_node,$start,$ref];
+      } else {
+	push @delete,[$ref_node,$start,$ref];
+      }
+    }
+  }
+  if (@delete) {
+    my $answer = QuestionQuery(
+       "Scope checking",
+       "The node is connected by some non-revertable relations with nodes "
+      ."from a different scope. These relations will be dropped if the node is pasted:\n\n"
+      .join("\n", map { "\t" . _rel_name($_->[2]->{relation},'%2$s')
+			.($_->[1]->{name} ? " from ".$_->[1]->{name} : '')
+		      } @delete)."\n",
+       "Drop relation and Paste",
+       "Ignore relations and Paste",
+       "Cancel"
+     );
+    if ($answer =~ /Ignore/) {
+      ChangingFile(1);
+      CutPastePreserveOrder($node,$new_parent);
+      return 1;
+    } elsif ($answer !~ /Paste/) {
+      return 0;
+    }
+  }
+
+  # reverse incomming relations
+  for my $r (@revert) {
+    my ($ref_node,$start,$ref) = @$r;
+    ChangingFile(1);
+    ReverseRelation($ref->{relation});
+    $ref->{target} = GetNodeName($start);
+    CutPastePreserveOrder($ref_node,$node);
+  }
+
+  # drop irreversibe incomming relations
+  for my $r (@delete) {
+    ChangingFile(1);
+    DeleteLeafNode($r->[0]);
+  }
+
+ my ($ref_from_new_parent) = grep { $_->{'#name'} eq 'ref' and $_->{'target'} eq $node->{name} } $new_parent->children;
+ my $ref_to_new_parent;
+  if (!$ref_from_new_parent) {
+    ($ref_to_new_parent)  = grep { $_->{'#name'} eq 'ref' and $_->{'target'} eq $new_parent->{name} } $node->children;
+    if ($ref_to_new_parent) {
+      undef $ref_to_new_parent unless isReversible($ref_to_new_parent->{relation});
+    }
+  }
+
+
+  my $forget_relation;
+  # convert the main relation to a ref to old_parent
+  if ($old_parent) {
+    my $cmp = cmp_subquery_scope($old_parent,$new_parent);
+    if ($cmp<0) {
+      if (SeqV($node->{relation})) {
+	if (isReversible($node->{relation})) {
+	  ChangingFile(1);
+	  $forget_relation = 1;
+	  my $ref = NewSon($node);
+	  $ref->{'#name'}='ref';
+	  DetermineNodeType($ref);
+	  $ref->{target} = GetNodeName($old_parent);
+	  $ref->{relation} = ReverseRelation(delete $node->{relation});
+	} else {
+	  return (QuestionQuery(
+	    "Pasting to a subquery",
+	    "The node and its old parent were connected by relation "._rel_name($node->{relation})."\n".
+	    "that cannot be reversed. This relation will be dropped after paste",
+	    "Drop relation and Paste",
+	    "Cancel") =~ /Paste/ ? 1 : 0);
+	}
+      }
+    } elsif($cmp>=0) {
+      my $answer;
+      if (!$ref_from_new_parent and !$ref_to_new_parent) {
+	my $rel_name = _rel_name($node->{relation},'%2$s');
+  	if ($old_parent and $rel_name) {
+	  if ($new_parent and $new_parent->parent) {
+	    $answer = 'Use';
+	  } else {
+	    $answer = 'Make';
+	  }
+# 	  $answer = QuestionQuery(
+# 	    "Preserve relations",
+# 	    "Do you want to preserve relation $rel_name to old parent as a reference?",
+# 	    "Make a reference",
+# 	    "Use as relation to new parent",
+# 	    "Forget",
+# 	    "Cancel");
+# 	  return if $answer eq 'Cancel';
+ 	} else {
+ 	  $answer = 'Forget';
+ 	}
+      } else {
+	$answer = 'Make';
+      }
+      if ($answer =~ /Forget/) {
+	$forget_relation = 1;
+      } elsif ($answer =~ /Make/) {
+	ChangingFile(1);
+	my $relation = delete $node->{relation};
+	$forget_relation = 1;
+	my $ref = NewSon($old_parent);
+	$ref->{'#name'}='ref';
+	DetermineNodeType($ref);
+	$ref->{target} = GetNodeName($node);
+	$ref->{relation} = $relation;
+      }
+    }
+  }
+
+
+
+  # find a ref to new_parent and use it as the main relation
+  #
+  {
+    my $ref = $ref_from_new_parent || $ref_to_new_parent;
+    if ($ref) {
+      ChangingFile(1);
+      $node->{relation} = delete $ref->{relation};
+      ReverseRelation($node->{relation}) if $ref_to_new_parent;
+      DeleteLeafNode($ref);
+      CutPastePreserveOrder($node,$new_parent);
+      DetermineNodeType($node);
+      return 1;
+    }
+ }
+
+  ChangingFile(1);
+  CutPastePreserveOrder($node,$new_parent);
+  AssignRelation($node) if $forget_relation;
+  return 1;
+}
+
+sub CutPastePreserveOrder {
+  my ($node,$new_parent)=@_;
+  my $n = $new_parent->root;
+  my $last; # left-nost child of new_parent that precedes node
+  while ($n && $n!=$node) {
+    $last = $n if $n->parent == $new_parent;
+    $n=$n->following;
+  }
+  if ($last) {
+    return CutPasteAfter($n,$last);
+  } else {
+    return CutPaste($n,$new_parent);
+  }
+}
+
+sub isReversible {
+  my ($relation)=@_;
+  my ($rel) = SeqV($relation);
+  my $rel_name = _rel_name($rel);
+  my $reversed_name = Tree_Query::Common::reversed_relation($rel_name);
+  return $reversed_name || undef;
+}
+
+sub ReverseRelation {
+  my ($relation)=@_;
+  croak("Cannot call ReverseRelation() on undefined value") unless $relation;
+  my ($rel)=SeqV($relation);
+  my $reversed_name = Tree_Query::Common::reversed_relation(_rel_name($rel));
+  if ($reversed_name) {
+    if ($reversed_name=~s/^(user-defined)://) {
+      $rel->set_name($1);
+      $rel->value->{label}=$reversed_name;
+    } else {
+      $rel->set_name($reversed_name);
+    }
+  }
+  return $relation;
+}
+
+
 sub EditRelationFromTo {
   my ($node,$target)=@_;
   my $type = $node->{'#name'};
@@ -1356,14 +1694,9 @@ sub EditRelationFromTo {
   return unless $target_is =~/^(?:node|subquery)$/
     and $type =~/^(?:node|subquery|ref)$/;
   return if cmp_subquery_scope($node,$target)<0;
-  my @sel = map {
-    my $name = $_->name;
-    if ($name eq 'user-defined') {
-      $_->value->{label}.qq( ($name))
-    } else {
-      $name
-    }
-  } map { SeqV($_->{relation}) }
+  my @sel =
+    map _rel_name($_,"%s (%s)"),
+    map { SeqV($_->{relation}) }
     grep { $_->{target} eq $target->{name} }
       ($type eq 'ref' ? $node : (grep $_->{'#name'} eq 'ref', $node->children));
   my $node_type = $node->{'node-type'};
@@ -1409,11 +1742,7 @@ sub AddOrRemoveRelations {
   for my $ref (@refs) {
     my ($rel)=SeqV($ref->{relation});
     if ($rel) {
-      my $rel_name = $rel->name;
-      my $val = $rel->value;
-      if ($rel_name eq 'user-defined') {
-	$rel_name = $val->{label}." ($rel_name)";
-      }
+      my $rel_name = _rel_name($rel,"%s (%s)");
       if ($opts->{-add_only}) {
 	delete $types{$rel_name}; # already have it
       } elsif (!$types{$rel_name}) {

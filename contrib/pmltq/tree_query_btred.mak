@@ -2939,19 +2939,6 @@ sub claim_search_win {
     'same-tree-as' => 40,
    );
 
-  %reverse = (
-    'user-defined:echild' => 'user-defined:eparent',
-    'user-defined:eparent' => 'user-defined:echild',
-    'descendant' => 'ancestor',
-    'ancestor' => 'descendant',
-    'parent' => 'child',
-    'child' => 'parent',
-    'same-tree-as' => 'same-tree-as',
-    'order-precedes' => 'order-follows',
-    'order-follows' => 'order-precedes',
-    'depth-first-precedes' => 'depth-first-follows',
-    'depth-first-follows' => 'depth-first-precedes',
-   );
 
   sub name_all_query_nodes {
     my ($tree)=@_;
@@ -2990,7 +2977,7 @@ sub claim_search_win {
     if ($name eq 'user-defined') {
       $name.=':'.$rel->value->{label};
     }
-    my $rname = $reverse{$name};
+    my $rname = Tree_Query::Common::reversed_relation($name);
     if (defined $rname) {
       my $rev;
       if ($rname =~s/^user-defined://) {

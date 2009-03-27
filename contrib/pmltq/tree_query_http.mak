@@ -177,7 +177,7 @@ sub search_first {
   if ($matches) {
     my $returns_nodes=$res->header('Pmltq-returns-nodes');
     $limit=$row_limit unless $returns_nodes;
-    my $how_many = ((defined($limit) and $matches==$limit) ? '>=' : '').
+    my $how_many = (($limit and $matches==$limit) ? '>=' : '').
       $matches.($returns_nodes ? ' match'.($matches>1?'es':'') : ' row'.($matches>1?'s':''));
     return $results unless
       (!$returns_nodes and $matches<200) or
@@ -450,8 +450,16 @@ sub init {
   my $configuration = $self->{config}{data};
   my $cfgs = $self->{config}{pml}->get_root->{configurations};
   my $cfg_type = $self->{config}{type};
-  if (!$id) {
+  if (GUI() and !$id) {
     my @opts = ((map { $_->{id} } map $_->value, grep $_->name eq 'http', SeqV($cfgs)));
+    unless (@opts) {
+      my $cfg = Fslib::Struct->new();
+      edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
+      $cfgs->push_element('http',$cfg);
+      $self->{config}{pml}->save();
+      push @opts, $cfg->{id};
+    }
+
     my @sel= $configuration ? $configuration->{id} : @opts ? $opts[0] : ();
     ListQuery('Select connection',
 			 'browse',
