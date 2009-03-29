@@ -1228,7 +1228,7 @@ sub get_nodelist_hook {
 }
 
 my (%legend,%main_query);
-
+our $no_legend;
 sub root_style_hook {
   my ($root,$styles,$Opts)=@_;
   DrawArrows_init();
@@ -1237,6 +1237,8 @@ sub root_style_hook {
   my @nodes = GetDisplayedNodes();
   my $hv = HiddenVisible();
   %main_query = map { $_=>1 } Tree_Query::Common::FilterQueryNodes($root);
+  return if $no_legend;
+
   for my $node (@nodes) {
     my @refs;
     my $qn = first { $_->{'#name'} =~ /^(?:node|subquery)$/ } ($node,$node->ancestors);
@@ -1278,7 +1280,7 @@ sub root_style_hook {
 sub after_redraw_hook {
   return unless $root;
   DrawArrows_cleanup();
-
+  return if $no_legend;
   return if $SEARCH and !keys(%legend) and ($root and $root->firstson);
   my $tv = $grp->treeView;
   my $scale=$tv->scale_factor();
@@ -2242,13 +2244,13 @@ sub EditQuery {
 								     $ed->get('insert','end'));
 			my $relation = 'child';
 			my $user_defined = Tree_Query::Common::user_defined();
-			if ($prev=~/(${user_defined})\s*$/) {
+			if ($user_defined and $prev=~/(${user_defined})\s*$/) {
 			  $relation = $1.' (user-defined)';
 			} elsif ($prev=~/(${relation_re})\s*$/) {
 			  $relation = $1;
 			}
 			my @types=
-			  $node_type ? 
+			  $node_type ?
 			  GetRelativeQueryNodeType($node_type,$SEARCH,CreateRelation($relation)) :
 			    @{$SEARCH->get_node_types};
 			if (@types==1) {
@@ -2388,7 +2390,7 @@ sub EditQuery {
 		   }
 		 } else {
 		   $f->Button(-text => $label,
-			      ($label=~/([[:alpha:]])/ ? (-underline => $-[0]) : ()),
+#			      ($label=~/([[:alpha:]])/ ? (-underline => $-[0]) : ()),
 			      defined($value) ? ( -command => [ sub { $_[0]->Insert($_[1]=~/\$|\^/ ? $_[1] : ' '.$_[1].' ');
 						      $_[0]->SetCursor('insert -2 chars') if $_[1]=~/["'[({]/;
 						    }, $ed, $value] ) : (),
@@ -2396,7 +2398,7 @@ sub EditQuery {
 			       )->pack(-side=>'left');
 		 }
 	       }
-	       $d->BindButtons;
+	       $d->BindButtons($d);
 	     },
 	   };
   while ( defined ($string = EditBoxQuery('Edit query node', $string, '',$qopts)) ) {
