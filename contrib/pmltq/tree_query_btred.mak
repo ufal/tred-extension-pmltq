@@ -376,7 +376,7 @@ sub search_first {
   $opts||={};
   local $SIG{__DIE__} = sub {
     confess(@_)
-  } if $DEBUG>1;
+  } if $DEBUG>3;
   my $query = $opts->{query} || $root;
   $self->{query}=$query;
   my $evaluator = $self->{evaluator} = Tree_Query::BtredEvaluator->new($query,
@@ -452,7 +452,10 @@ sub prepare_results {
   my ($self,$dir,$wins)=@_;
   if ($dir eq 'next') {
     return unless $self->{evaluator};
-    if ($self->{current_result} and !$self->{have_all_results}) {
+    if ($self->{current_result}
+	and
+	!($self->{have_all_results}
+	    and !($self->{next_results} and @{$self->{next_results}}))) {
       push @{$self->{past_results}},
 	$self->{current_result};
     }
@@ -507,6 +510,7 @@ sub prepare_results {
 	   ];
 	} else {
 	  $self->{have_all_results}=1;
+	  pop @{$self->{past_results}};
 	}
       };
       $self->{currentFilePos} = CurrentTreeNumber($search_win);
@@ -529,6 +533,26 @@ sub prepare_results {
     }
   }
 }
+
+sub get_result_windows {
+  my ($self)=@_;
+  my @wins = grep { IsMinorModeEnabled('Tree_Query_Results',$_) } TrEdWindows();
+  if (!@wins) {
+    if ($self->{file}) {
+      @wins = map { $_->[0] } grep { $_->[1]->filename eq $self->{file} }
+	grep ref($_->[1]), map [$_,CurrentFile($_)], TrEdWindows();
+    } else {
+      @wins = map { $_->[0] } grep { $_->[1]->name eq $self->{filelist} } grep ref($_->[1]), map [$_,GetCurrentFileList($_)], TrEdWindows();
+    }
+    EnableMinorMode('Tree_Query_Results',$_) for @wins;
+  }
+  if (@wins) {
+    return @wins;
+  } else {
+    return $self->Tree_Query::TrEd::get_result_windows();
+  }
+}
+
 
 sub get_nth_result_filename {
   my ($self,$idx)=@_;
@@ -590,36 +614,6 @@ sub select_matching_node {
   }
   return;
 }
-
-######## Private
-
-sub claim_search_win {
-  my ($self,$file)=@_;
-  my $win;
-  $file ||= $self->{file};
-  if ($file) {
-    ($win) = map { $_->[0] } grep { $_->[1]->filename eq $file } grep ref($_->[1]), map [$_,CurrentFile($_)], TrEdWindows();
-  } else {
-    ($win) = map { $_->[0] } grep { $_->[1]->name eq $self->{filelist} } grep ref($_->[1]), map [$_,GetCurrentFileList($_)], TrEdWindows();
-  }
-  unless ($win) {
-    $win = SplitWindowVertically();
-    my $cur_win = $grp;
-    $grp=$win;
-    EnableMinorMode('Tree_Query_Results',$win);
-    eval {
-      if ($file) {
-	Open($file);
-      } elsif ($self->{filelist}) {
-	SetCurrentFileList($self->{filelist});
-      }
-    };
-    $grp=$cur_win;
-    die $@ if $@;
-  }
-  return $win;
-}
-
 
 }
 
@@ -2257,9 +2251,9 @@ sub claim_search_win {
 	      } else { undef }
 	    } ($opts->{type}, $self->{name2type}{$target});
 	  die "Could not determine ordering attribute for node '$opts->{id}'\n"
-	    unless defined $attr1;
+	    unless defined $attr1 and length $attr1;
 	  die "Could not determine ordering attribute for node '$target'\n"
-	    unless defined $attr2;
+	    unless defined $attr2 and length $attr1;
 	  # $expression = qq(\$start->$attr1)
 	  #               .($relation eq 'order-precedes' ? ' < ' : ' > ')
 	  #               .qq(\$end->$attr2 )
