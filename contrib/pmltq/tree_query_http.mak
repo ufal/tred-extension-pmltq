@@ -125,6 +125,8 @@ sub search_first {
   my ($self, $opts)=@_;
   $opts||={};
   my $query = $self->{query} = $opts->{query} || $root;
+  my $query_id = (ref($query) && $query->{id}) || '';
+
   $self->{last_query_nodes} = [Tree_Query::Common::FilterQueryNodes($query)];
   $query = Tree_Query::Common::as_text($query,{
     resolve_types=>1,
@@ -151,7 +153,6 @@ sub search_first {
   $self->{limit}=$limit;
   my $t1 = new Benchmark;
   my $time = timestr(timediff($t1,$t0));
-  my $query_id = (ref($query) && $query->{id}) || '';
   unless ($opts->{quiet}) {
     print STDERR "$query_id\t".$self->identify."\t$time\n";
   }
