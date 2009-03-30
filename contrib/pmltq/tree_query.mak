@@ -1131,13 +1131,29 @@ sub RenameNode {
       $n->{target} = $new_name if $n->{target} eq $old_name;
     } elsif ($n->{'#name'} eq 'test') {
       for my $attr (qw(a b)) {
-	$n->{$attr} =~ s{(['](?:[^'\\]+|\\.)*[']|["](?:[^"\\]+|\\.)*["])|\$\Q$old_name\E}{
-	  $1 ? $1 : '$'.$new_name
-	}ge;
+	$n->{$attr} = RenameInExpression($n->{$attr}, $old_name,$new_name);
       }
     }
     $n=$n->following($top);
   }
+  if ($top and !$top->parent) {
+    my ($filter)= ListV($top->{'output-filters'});
+    for my $attr (qw(return group-by)) {
+      if ($filter->{$attr}) {
+	for (@{$filter->{$attr}}) {
+	  $_ = RenameInExpression($_, $old_name,$new_name);
+	}
+      }
+    }
+  }
+}
+
+sub RenameInExpression {
+  my ($val, $old_name,$new_name)=@_;
+  $val =~ s{(['](?:[^'\\]+|\\.)*[']|["](?:[^"\\]+|\\.)*["])|\$\Q$old_name\E}{
+    $1 ? $1 : '$'.$new_name
+  }ge;
+  return $val;
 }
 
 #include "ng.inc"
@@ -1829,7 +1845,7 @@ sub SelectSearch {
     -cancel_button=>'Cancel',
     -buttons => ['Cancel'],
   );
-  $d->add('Label', -text=>'What data are you going to search through?')->pack(-pady => 10);
+  $d->add('Label', -text=>'Which data source are you going to query?')->pack(-pady => 10);
   my $f = $d->add('Frame')->pack(qw(-expand 1 -fill both));
   $d->BindEscape;
   my ($vol,$dir)=File::Spec->splitpath(__this_module_path());
@@ -2196,7 +2212,7 @@ sub EditQuery {
 	     -height => 16,
 	     -init => sub {
 	       my ($d,$ed)=@_;
-	       my $f = $d->add('Frame')->pack(-side=>'top');
+	       my $f = $d->add('Frame')->pack(-side=>'top',-expand => 'no');
 	       for (
 		 qw(? 3x),
 		 [Relation => undef, #[ map { /^(\S+)/ } @{GetRelationTypes($this)} ],
@@ -2266,7 +2282,32 @@ sub EditQuery {
 		     ],
                   }
 		 ],
-		 q|$n :=|,
+		 ['$n :=',undef, {
+		   -command => [
+		     sub {
+			 my ($ed,$tree)=@_;
+			 my $string = $ed->get('0.0','end');
+			 my %seen = map { $_=> 1 } ($string =~ m{\$([[:alpha:]_][[:alnum:]_]*)}g);
+			 while ($tree) {
+			   $seen{$tree->{name}} = 1 if $tree->{'#name'}=~/node|subquery/;
+			   $tree = $tree->following;
+			 }
+			 my $x = 'a';
+			 while ($seen{$x}) {
+			   $x++;
+			 }
+			 # replace any previous assignment
+			 if ($ed->get('0.0','insert') =~ /(\$[[:alpha:]_][[:alnum:]_]*\s*:=\s*)$/s) {
+			   $ed->delete('insert - '.length($1).' chars','insert');
+			 }
+			 $ed->Insert('$'.$x.' := ');
+			 if ($ed->get('insert','end') !~ /^\s*\[/s) {
+			   $ed->Insert('[  ]');
+			   $ed->SetCursor('insert - 2 chars');
+			 }
+		       },$ed,$node->root
+		   ],
+		 } ],
 		 '[ ]',
 		 "\n",
 		 ['Attribute',undef,
@@ -2527,9 +2568,17 @@ sub DeleteNode {
   }
   my $p = $node->parent && $node->parent->parent;
   if ($node->{'#name'} =~ /^(?:node|subquery)/) {
-    DeleteSubtree($_) for grep { !($_->{'#name'} eq 'node'
-				     or ($p && $_->{'#name'} eq 'subquery')) }
+    my $name = $node->{name};
+    DeleteSubtree($_) for grep { !($_->{'#name'} eq 'node' or ($p && $_->{'#name'} eq 'subquery')) }
       $node->children;
+
+    # delete all ref-nodes pointing to $node
+    for my $ref (grep { $_->{'#name'} eq 'ref' and $_->{target} eq $name  } $node->root->descendants) {
+      # if the ref node is an only child of a negation, delete the negation as well
+      $ref = $ref->parent if $ref->parent and $ref->parent->{'#name'} eq 'not'
+	and $ref->parent->children == 1;
+      DeleteSubtree($ref);
+    }
   }
   delete_node_keep_children($node);
 }
