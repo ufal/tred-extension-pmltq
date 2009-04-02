@@ -227,6 +227,7 @@ sub current_query {
 
 sub resolve_path {
   my ($self,$path)=@_;
+  return undef unless defined $path;
   my $cfg = $self->{config}{data};
   my $url = $cfg->{url};
   $url.='/' unless $url=~m{^https?://.+/};
@@ -241,7 +242,7 @@ sub map_nodes_to_query_pos {
   my @nodes = ($tree,$tree->descendants);
   my $r = $self->{current_result};
   return {
-    map { $_->[1]=~/^\Q$fn\E\.(\d+)$/ ? ($nodes[$1] => $_->[0]) : () } 
+    map { (defined($_->[1]) and $_->[1]=~/^\Q$fn\E\.(\d+)$/) ? ($nodes[$1] => $_->[0]) : () } 
       reverse # upper nodes first (optional nodes do not overwrite their parents)
       map { [$_,$self->resolve_path($r->[$_])] } 0..$#$r
   };
@@ -638,17 +639,21 @@ sub idx_to_pos {
   my ($self,$idx_list)=@_;
   my @res;
   for my $ident (@$idx_list) {
-    my $res = $self->request('node',
-		   [ idx=>$ident,
-		     format=>'text',
-		   ]);
-    unless ($res->is_success) {
-      die "Failed to resolve $ident!\n".$res->status_line."\n";;
+    unless ($ident =~ m{//}) {
+      my $res = $self->request('node',
+			       [ idx=>$ident,
+				 format=>'text',
+				]);
+      unless ($res->is_success) {
+	die "Failed to resolve $ident!\n".$res->status_line."\n";;
+      }
+      my $f = $res->content;
+      $f=~s/\r?\n$//;
+      print "$f\n";
+      push @res, $f;
+    } else {
+      push @res, undef;
     }
-    my $f = $res->content;
-    $f=~s/\r?\n$//;
-    print "$f\n";
-    push @res, $f;
   }
   return @res;
 }

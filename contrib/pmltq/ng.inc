@@ -15,10 +15,10 @@ sub fix_netgraph_ord_to_precedes {
   my $end;
   my $rel;
   if ($x eq qq($ord) and $y=~/^([[:alnum:]]+)\.\Q$ord\E$/) {
-    $end = $name2node_hash{lc($1)};
+    $end = $name2node_hash{$1};
     $rel  = 'order-precedes';
   } elsif ($y eq qq($ord) and $x=~/^([[:alnum:]]+)\.\Q$ord\E$/) {
-    $end=$name2node_hash{lc($1)};
+    $end=$name2node_hash{$1};
     $rel  = 'order-follows';
   }
   if ($end) {

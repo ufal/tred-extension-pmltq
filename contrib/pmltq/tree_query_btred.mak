@@ -13,7 +13,7 @@ our $DEBUG;
 our $ORDER_SIBLINGS=1;
 our $ALL_SUBQUERIES_LAST=0;
 #ifdef TRED
-$DEBUG=3;
+$DEBUG=4 if $::tredDebug;
 #endif
 
 my $evaluator;
@@ -211,13 +211,9 @@ sub get_type_decl_for_query_node {
 
 sub get_decl_for {
   my ($self,$type)=@_;
-  $type=~s{(/|$)}{.type$1};
-  for my $schema ($self->get_schemas) {
-    my $decl = $schema->find_type_by_path('!'.$type);
-    return $decl if $decl;
-  }
-  warn "Did not find type '!$type'";
-  return;
+  my $ret = eval { Tree_Query::Common::QueryTypeToDecl($type,$self->get_schemas) };
+  warn $@ if $@;
+  return $ret;
 }
 
 sub get_node_types {
@@ -248,15 +244,49 @@ sub _find_pmlrf_relations {
   return $self->{pmlrf_relations} = [sort @relations];
 }
 
+sub _find_pmlrf_relations_for_type {
+  my ($self,$type_name)=@_;
+  my @schemas = $self->get_schemas;
+  my @relations=();
+  my $relations_hash = $self->get_pmlrf_relations_hash; # init
+  my $decl = $self->get_decl_for($type_name);
+  return [] unless $decl;
+  for my $path ($decl->get_paths_to_atoms({ no_childnodes => 1 })) {
+    my $mdecl = $decl->find($path);
+    $mdecl=$mdecl->get_content_decl unless $mdecl->is_atomic;
+    if ($mdecl->get_decl_type == PML_CDATA_DECL and
+	$mdecl->get_format eq 'PMLREF') {
+      push @relations, $path;
+      $relations_hash->{$type_name}{$path}='#any';
+    }
+  }
+  return [sort @relations];
+}
+
 sub get_pmlrf_relations {
-  my ($self)=@_;
-  return $self->{pmlrf_relations} || $self->_find_pmlrf_relations;
+  my ($self,$qnode_or_type)=@_;
+  if ($qnode_or_type) {
+    my $type = ref($qnode_or_type) ? Tree_Query::Common::GetQueryNodeType($qnode_or_type,$self) : $qnode_or_type;
+    my $rels = ref($self->{pmlrf_relations_hash}) && $self->{pmlrf_relations_hash}{$type};
+    if ($rels) {
+      return [ sort keys %$rels ];
+    } else {
+      return $self->_find_pmlrf_relations_for_type($type);
+    }
+  } else {
+    return $self->{pmlrf_relations} || $self->_find_pmlrf_relations;
+  }
 }
 
 sub get_pmlrf_relations_hash {
-  my ($self)=@_;
+  my ($self,$type)=@_;
   my $hash = $self->{pmlrf_relations_hash};
-  unless ($hash) {
+  if ($type) {
+    $hash = $hash->{$type} if $hash;
+    return $hash if $hash;
+    $self->_find_pmlrf_relations_for_type($type);
+    $hash = $self->{pmlrf_relations_hash}{$type};
+  } elsif (!$hash) {
     $self->_find_pmlrf_relations;
     $hash = $self->{pmlrf_relations_hash};
   }
@@ -265,9 +295,9 @@ sub get_pmlrf_relations_hash {
 
 
 sub get_specific_relations {
-  my ($self)=@_;
+  my ($self,$qnode_or_type)=@_;
   return [qw(echild eparent a/lex.rf|a/aux.rf), 
-	  @{$self->get_pmlrf_relations}];
+	  @{$self->get_pmlrf_relations($qnode_or_type)}];
 }
 
 my %user_defined_relations = (
@@ -304,10 +334,10 @@ my %known_pmlref_relations = (
 
 sub get_relation_target_type {
   my ($self,$node_type,$relation)=@_;
-  my $pmlref_relations_hash = $self->get_pmlrf_relations_hash;
+  my $pmlref_relations_hash = $self->get_pmlrf_relations_hash($node_type);
   return $known_pmlref_relations{$node_type} && $known_pmlref_relations{$node_type}{$relation}
        || $user_defined_relations{$node_type} && $user_defined_relations{$node_type}{$relation}
-       || $pmlref_relations_hash->{$node_type} && $pmlref_relations_hash->{$node_type}{$relation}
+       || $pmlref_relations_hash && $pmlref_relations_hash->{$relation}
 	 ;
 }
 
@@ -506,7 +536,9 @@ sub prepare_results {
 	if ($result) {
 	  my $result_files = $self->{evaluator}->get_result_files;
 	  $self->{current_result} = [
-	    map ThisAddress($result->[$_],$result_files->[$_]), 0..$#$result
+	    map {
+	      UNIVERSAL::isa($result->[$_],'FSNode') ? ThisAddress($result->[$_],$result_files->[$_]) : undef
+	    } 0..$#$result
 	   ];
 	} else {
 	  $self->{have_all_results}=1;
@@ -576,7 +608,7 @@ sub map_nodes_to_query_pos {
   my @nodes = ($tree,$tree->descendants);
   my $r = $self->{current_result};
   return {
-    map { $_->[1]=~/^\Q$fn\E\.([0-9]+)$/ ? ($nodes[$1] => $_->[0]) : () } 
+    map { (defined($_->[1]) and $_->[1]=~/^\Q$fn\E\.([0-9]+)$/) ? ($nodes[$1] => $_->[0]) : () }
       reverse # upper nodes first (optional nodes do not overwrite their parents)
       map { [$_,$r->[$_]] } 0..$#$r
   };
@@ -598,7 +630,7 @@ sub select_matching_node {
     my $fsfile = $win->{FSFile};
     next unless $fsfile;
     my $fn = $fsfile->filename.'##'.($win->{treeNo}+1);
-    next unless $result =~ /\Q$fn\E\.([0-9]+)$/;
+    next unless (defined($result) and $result =~ /\Q$fn\E\.([0-9]+)$/);
     my $pos = $1;
     my $r=$fsfile->tree($win->{treeNo});
     for (1..$pos) {
@@ -786,7 +818,7 @@ sub select_matching_node {
     }
     # @{$self->{query_nodes}}=@orig_nodes;
     %name2pos = map {
-      my $name = lc($query_nodes[$_]->{name});
+      my $name = $query_nodes[$_]->{name};
       (defined($name) and length($name)) ? ($name=>$_) : ()
     } 0..$#query_nodes;
     {
@@ -825,7 +857,23 @@ sub select_matching_node {
 	die "The query specifies an invalid type '$default_type' as default node type!";
       }
       for my $node (@all_query_nodes) {
-	if ($node->{'node-type'}) {
+	if (Tree_Query::Common::IsMemberNode($node)) {
+	  if ($node->{'node-type'}) {
+	    my $type = Tree_Query::Common::GetMemberNodeType($node,$self->{type_mapper});
+	    if ($self->{type_mapper}->get_decl_for($type)) {
+	      # ok
+	      my $name = $node->{name};
+	      if (defined($name) and length($name)) {
+		$name2type{$name} = $type;
+	      }
+	    } else {
+	      die "Invalid member path '$type' for ".Tree_Query::Common::as_text($node)."\n";
+	    }
+	  } else {
+	    die "Member must specify attribute name: ".Tree_Query::Common::as_text($node)."\n";
+	  }
+	  next;
+	} elsif ($node->{'node-type'}) {
 	  if (!$node_types{$node->{'node-type'}}) {
 	    die "The query specifies an invalid type '$node->{'node-type'}' for node: ".Tree_Query::Common::as_text($node)."\n";
 	  }
@@ -836,7 +884,7 @@ sub select_matching_node {
 	      (Tree_Query::Common::GetRelativeQueryNodeType(
 		$parent->{'node-type'},
 		$self->{type_mapper},
-		SeqV($node->{relation}))
+		TredMacro::SeqV($node->{relation}))
 	       ) : @{$self->{type_mapper}->get_node_types};
 	  if (@types == 1) {
 	    $node->{'node-type'} = $types[0];
@@ -848,11 +896,11 @@ sub select_matching_node {
 		."Possible types are: ".join(',',@types)." !\n";
 	  }
 	}
+	my $name = $node->{name};
+	if (defined($name) and length($name)) {
+	  $name2type{$name} = $node->{'node-type'}
+	}
       }
-      %name2type = map {
-	my $name = lc($_->{name});
-	(defined($name) and length($name)) ? ($name=>$_->{'node-type'}) : ()
-      } @all_query_nodes;
     }
 
     # compile condition testing functions and create iterators
@@ -978,14 +1026,17 @@ sub select_matching_node {
   sub create_iterator {
     my ($self,$qn,$conditions)=@_;
     	# TODO: deal with negative relations, etc.
+
     my ($rel) = TredMacro::SeqV($qn->{relation});
     my $relation = $rel && $rel->name;
     $relation||='child';
 
-    print STDERR "iterator: $relation\n" if $DEBUG>1;
     my $iterator;
+
     if ($relation eq 'child') {
       $iterator = ChildnodeIterator->new($conditions);
+    } elsif ($relation eq 'member') {
+      $iterator = MemberIterator->new($conditions,$qn->{'node-type'});
     } elsif ($relation eq 'descendant') {
       my ($min,$max)=
 	map { (defined($_) and length($_)) ? $_ : undef }
@@ -1030,14 +1081,16 @@ sub select_matching_node {
 	$iterator = EChildIterator->new($conditions);
       } elsif ($label eq 'eparent') {
 	$iterator = EParentIterator->new($conditions);
-      } elsif (first { $_ eq $label } @{$self->{type_mapper}->get_pmlrf_relations}) {
+      } elsif (first { $_ eq $label }
+		 @{$self->{type_mapper}->get_pmlrf_relations($qn->parent)}) {
 	$iterator = PMLREFIterator->new($conditions,$label);
       } else {
 	die "user-defined relation '".$label."' unknown or not implemented in BTrEd Search\n"
       }
     } else {
-      die "relation ".$relation." not yet implemented\n"
+      die "relation ".$relation." not valid for this node or not yet implemented \n"
     }
+    print STDERR "iterator: ".ref($iterator)."\n" if $DEBUG>1;
     if ($qn->{optional}) {
       return OptionalIterator->new($iterator);
     } else {
@@ -1981,7 +2034,7 @@ sub select_matching_node {
     my ($self,$qnode,$opts)=@_;
     my $conditions = $self->serialize_element({
       %$opts,
-      type => $qnode->{'node-type'},
+      type => Tree_Query::Common::GetQueryNodeType($qnode,$self->{type_mapper}),
       name => 'and',
       condition => $qnode,
     });
@@ -2025,12 +2078,13 @@ sub select_matching_node {
     my $nodetest = '$node and ($backref or '
       .(defined($optional) ? $optional.'==$node or ' : '')
       .'!exists($have{$node}))';
-    my $type_name = quotemeta($qnode->{'node-type'});
+    my $type_name = Tree_Query::Common::IsMemberNode($qnode) ? undef : quotemeta($qnode->{'node-type'});
     my $id=$qnode->{'name'} || '';
     my $sub = qq(#line 1 "query-node/${match_pos}/$id"\n)
       . 'sub { my ($node,$fsfile,$backref)=@_; '."\n  "
        .$nodetest
-       .(defined($type_name) && length($type_name) ? "\n and ".q[$node->type->get_decl_path =~ m{^\!].$type_name.q[(?:\.type)?$}] : ())
+       .(defined($type_name) && length($type_name) ? "\n and ".
+	   q[$node->type->get_decl_path =~ m{^\!].$type_name.q[(?:\.type)?$}] : ())
        .(defined($conditions) ? "\n  and ".$conditions : '')
        . $check_preceding
        ."\n}";
@@ -2080,6 +2134,9 @@ sub select_matching_node {
 	# 	$right=~s/\)\s*$//;
 	# 	my @right = split /,/,$right;
 	# 	$condition='do { my $node='.$left.'; ('.join(' or ',map { '$node eq '.$_ } @right).')}';
+      } elsif ($operator eq '->') {
+	# this is a special faked operator for PMLREF/ID comparison
+	$condition='('.$left.' =~ /^(.*#)?\Q'.$right.'\E$/)';
       } else {
 	$condition='('.$left.' '.$operator.' '.$right.')';
       }
@@ -2197,7 +2254,7 @@ sub select_matching_node {
     } elsif ($name eq 'ref') {
       my ($rel) = TredMacro::SeqV($node->{relation});
       return unless $rel;
-      my $target = lc( $node->{target} );
+      my $target = $node->{target};
       my $relation = $rel->name;
       my $expression;
       my $label='';
@@ -2205,20 +2262,20 @@ sub select_matching_node {
 	$label = $rel->value->{label};
 	$expression = $test_user_defined_relation{$label};
 	if (!defined $expression) {
-	  if (first { $_ eq $label } @{$self->{type_mapper}->get_pmlrf_relations}) {
+	  if (first { $_ eq $label } @{$self->{type_mapper}->get_pmlrf_relations($node)}) {
 	    return $self->serialize_element(
 	      {
 		%$opts,
 		name => 'test',
 		condition => {
 		  '#name' => 'test',
-		  a => 'id($'.$target.')',
-		  b => $label,
-		  operator => '=',
+		  a => $label,
+		  b => 'id($'.$target.')',
+		  operator => '->',
 		},
 	      });
 	  } else {
-	    die "User-defined relation '$label' not supported test!\n";
+	    die "User-defined relation '$label' not supported as a test on this node!\n";
 	  }
 	}
       } else {
@@ -2350,7 +2407,7 @@ sub select_matching_node {
 	  die "Attribute reference cannot be used in output filter columns whose input is not the body of the query: '$opts->{expression}'"
 	}
 	if ($type eq 'REF_ATTR') {
-	  my $target = lc($pt->[0]);
+	  my $target = $pt->[0];
 	  $pt=$pt->[1];
 	  die "Error in attribute reference of node $target in expression $opts->{expression} of node '$this_node_id'"
 	    unless shift(@$pt) eq 'ATTR'; # not likely
@@ -2372,7 +2429,7 @@ sub select_matching_node {
 	my $type_decl = $self->{type_mapper}->get_decl_for($node_type);
 	my $ret;
 	if (!$type_decl) {
-	  die "Cannot resolve attribute path $attr on an unknown node type '$opts->{type}'\n";
+	  die "Cannot resolve attribute path $attr on an unknown node type '$node_type'\n";
 	  # where follows a possible fallback:
 	  $attr = (($attr=~m{/}) ? $node.qq`->attr(q($attr))` : $node.qq[->{q($attr)}]);
 	  $ret = qq{ $attr };
@@ -2394,7 +2451,7 @@ sub select_matching_node {
 		} elsif ($m and ($m->get_content_decl->get_role||'') eq '#KNIT') {
 		  $decl=$m->get_content_decl;
 		} else {
-		  die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find member '$step'\n" unless defined($m);
+		  die "Error while compiling attribute path $attr for objects of type '$node_type': didn't find member '$step'\n" unless defined($m);
 		}
 	      }
 	      #
@@ -2403,7 +2460,7 @@ sub select_matching_node {
 	      push @$foreach, [0,$pexp.'->{qq('.quotemeta($step).')}'];
 	      $pexp = '$var'.$#$foreach;
 	    } elsif ($decl_is == PML_SEQUENCE_DECL) {
-	      my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$opts->{type}': didn't find element '$step'\n";
+	      my $e = $decl->get_element_by_name($step) || die "Error while compiling attribute path $attr for objects of type '$node_type': didn't find element '$step'\n";
 	      $decl = $e->get_content_decl;
 	      push @$foreach, [1,$pexp.'->values(qq('.quotemeta($step).'))'];
 	      $pexp = '$var'.$#$foreach;
@@ -2415,18 +2472,20 @@ sub select_matching_node {
 	      } else {
 		push @$foreach, [1,'@{'.$pexp.'}'];
 		$pexp = '$var'.$#$foreach;
-		redo;
+		redo unless $step eq 'LM';
 	      }
 	    } elsif ($decl_is == PML_ALT_DECL) {
 	      $decl = $decl->get_content_decl;
 	      push @$foreach, [1,'AltV('.$pexp.')'];
 	      $pexp = '$var'.$#$foreach;
-	      redo;
+	      redo unless $step eq 'AM';
+	    } elsif ($decl->is_atomic and $step eq '#content') {
+	      #$pexp = '$var'.$#$foreach;
 	    } else {
-	      die "Error while compiling attribute path $attr for objects of type '$opts->{type}': Cannot apply location step '$step' to an atomic type '".$decl->get_decl_path."'!\n";
+	      die "Error while compiling attribute path $attr for objects of type '$node_type': Cannot apply location step '$step' to an atomic type '".$decl->get_decl_path."'!\n";
 	    }
 	  }
-	  $ret = '$var'.$#$foreach;
+	  $ret = $pexp;#'$var'.$#$foreach;
 	}
 	if ($opts->{output_filter}) {
 	  return $self->serialize_column_node_ref($ret,$opts);
@@ -2600,8 +2659,10 @@ sub select_matching_node {
 	      my $id_attr = defined($m) && $m->get_name;
 	      $ret= defined $id_attr ? $target.qq{->{q($id_attr)}} : 'undef';
 	    } elsif ($name eq 'tree_no') {
+	      # FIXME: die if this function is root on a member node
 	      $ret= qq{Fslib::Index($file->treeList,$target->root};
 	    } elsif ($name eq 'address') {
+	      # FIXME: die if this function is root on a member node
 	      $ret= qq{TredMacro::ThisAddress($target,$file)};
 	    } else {
 	      die "Function ${name}() not yet implemented!\n";
@@ -2875,7 +2936,7 @@ sub select_matching_node {
 	}
       } else {
 	print STDERR ("match $node->{id} [$$query_pos,$pos2match_pos->[$$query_pos]]: $node->{afun}.$node->{t_lemma}.$node->{functor}\n")
-	  if $DEBUG > 3;
+	  if ref($node) and  $DEBUG > 3;
 
 	if ($$query_pos<$#$iterators) {
 	  $$query_pos++;
@@ -2939,13 +3000,13 @@ sub select_matching_node {
     my @nodes = grep { $_->{'#name'} =~ /^(?:node|subquery)$/ } $tree->descendants;
     my $max=0;
     my %name2node = map {
-      my $n=lc($_->{name});
+      my $n=$_->{name};
       $max=$1+1 if $n=~/^n([0-9]+)$/ and $1>=$max;
       (defined($n) and length($n)) ? ($n=>$_) : ()
     } @nodes;
     my $name = 'n0';
     for my $node (@nodes) {
-      my $n=lc($node->{name});
+      my $n=$node->{name};
       unless (defined($n) and length($n)) {
 	$node->{name}= $n ='n'.($max++);
 	$name2node{$n}=$node;
@@ -2983,7 +3044,6 @@ sub select_matching_node {
 	  Fslib::CloneValue($rel->value)
 	   );
       }
-      $rev->value->{reversed}=$ref;
       return $rev;
     } else {
       return;
@@ -3003,7 +3063,7 @@ sub select_matching_node {
       ref($query_nodes) eq 'ARRAY' and $query_tree;
     my %node2pos = map { $query_nodes->[$_] => $_ } 0..$#$query_nodes;
     my %name2pos = map {
-      my $name = lc($query_nodes->[$_]->{name});
+      my $name = $query_nodes->[$_]->{name};
       (defined($name) and length($name)) ? ($name=>$_) : ()
     } 0..$#$query_nodes;
     my $root_pos = defined($query_root) ? $node2pos{$query_root} : undef;
@@ -3013,12 +3073,24 @@ sub select_matching_node {
     my @edges;
     my @parent;
     my @parent_edge;
+    my @is_member_node;
     for my $i (0..$#$query_nodes) {
       my $n = $query_nodes->[$i];
       print STDERR "$i: $n->{name}\n" if $DEBUG > 1;
       my $parent = $n->parent;
       my $p = $node2pos{$parent};
-      $parent[$i]=$p;
+      if (Tree_Query::Common::IsMemberNode($n)) {
+	while (defined($p) and Tree_Query::Common::IsMemberNode($parent)) {
+	  $parent = $parent->parent;
+	  $p = $node2pos{$parent};
+	}
+	$parent[$i]=$p; # this is the node to which we will collapse the member node
+	$is_member_node[$i] = 1;
+	next;
+      } else {
+	$parent[$i]=$p;
+      }
+
       # turn node's relation into parent's extra-relation
       if (defined $p) {
 	my ($rel) = TredMacro::SeqV($n->{relation});
@@ -3032,82 +3104,122 @@ sub select_matching_node {
 	$ref->{target} = $n->{name};
       }
     }
+
     for my $i (0..$#$query_nodes) {
       my $n = $query_nodes->[$i];
       for my $ref (grep { $_->{'#name'} eq 'ref' } $n->children) {
-	my $target = lc( $ref->{target} );
+	my $target = $ref->{target};
 	my ($rel)=TredMacro::SeqV($ref->{relation});
 	next unless $rel;
 	my $t = $name2pos{$target};
 	my $no_reverse;
+	my $no_direct;
 	my $tn = $query_nodes->[$t];
+	my $sn = $n;
+	my $s = $i;
+	my $edge_data=[$i,$t];
+	if ($is_member_node[$i]) {
+	  $s = $parent[$i];
+	  $sn = $query_nodes->[$s];
+	  $no_reverse=1;
+	}
+	if ($is_member_node[$t]) {
+	  $t = $parent[$t];
+	  $tn = $query_nodes->[$t];
+	  $no_direct=1;
+	}
 	my $tnp=$tn->parent;
+	next unless defined $t and defined $s and $t!=$s;
+
 	if ($n->{optional} or $tn->{optional} or ($tnp and $tnp->{optional})) {
 	  # only direct edges can go in and out of an optional node
 	  # and only direct edge can go to a child of an optional node
 	  next unless $rel==$parent_edge[$t];
 	  $no_reverse=1;
 	}
-	if (defined $t and $t!=$i) {
-	  push @edges,[$i,$t,$ref,weight($rel)] unless defined($root_pos) and $t==$root_pos;
-	  unless ($no_reverse or (defined($root_pos) and $i==$root_pos)) {
-	    my $reversed = reversed_rel($ref);
-	    if (defined $reversed) {
-	      push @edges,[$t,$i,$reversed,weight($reversed)];
-	    }
+
+	# similarly for member nodes:
+	# only one edge can come to a member node and it must be the member edge itself
+	unless ($no_direct) {
+	  push @edges,{
+	    from => $s,
+	    to => $t,
+	    ref=>$ref,
+	    real_start=>$edge_data->[0],
+	    real_end=>$edge_data->[1],
+	    weight=>weight($rel),
+	  } unless defined($root_pos) and $t==$root_pos;
+	}
+	unless ($no_reverse or (defined($root_pos) and $s==$root_pos)) {
+	  my $reversed = reversed_rel($ref);
+	  if (defined $reversed) {
+	    push @edges,{
+	    from => $t,
+	    to => $s,
+	    ref=>$reversed,
+	    reverse_of_ref => $ref,
+	    real_start=>$edge_data->[1],
+	    real_end=>$edge_data->[0],
+	    weight => weight($reversed),
+	  };
 	  }
 	}
       }
     }
     undef @parent_edge; # not needed anymore
     my $g=Graph->new(directed=>1);
-    $g->add_vertex($_) for 0..$#$query_nodes;
+    for my $i (0..$#$query_nodes) {
+      $g->add_vertex($i) unless $is_member_node[$i];
+    }
     my %edges;
     for my $e (@edges) {
-      my $has = $g->has_edge($e->[0],$e->[1]);
-      my $w = $e->[3]||100000;
-      if (!$has or $g->get_edge_weight($e->[0],$e->[1])>$w) {
-	$edges{$e->[0]}{$e->[1]}=$e->[2];
-	$g->delete_edge($e->[0],$e->[1]) if $has;
-	$g->add_weighted_edge($e->[0],$e->[1], $w);
+      my $has = $g->has_edge($e->{from},$e->{to});
+      my $w = $e->{weight}||100000;
+      if (!$has or $g->get_edge_weight($e->{from},$e->{to})>$w) {
+	$edges{$e->{from}}{$e->{to}}=$e;
+	$g->delete_edge($e->{from},$e->{to}) if $has;
+	$g->add_weighted_edge($e->{from},$e->{to}, $w);
       }
     }
     my $mst=$g->MST_ChuLiuEdmonds();
 #ifdef TRED
 #    TredMacro::ChangingFile(1);
 #endif
-    for my $qn (@$query_nodes) {
-      $qn->cut();
+#    return;
+    
+    for my $i (0..$#$query_nodes) {
+      next if $is_member_node[$i];
+      $query_nodes->[$i]->cut();
     }
     my $last_ref=0;
     my @roots;
     my %w;
     for my $i (0..$#$query_nodes) {
+      next if $is_member_node[$i];
       my $qn = $query_nodes->[$i];
-      my $p=undef;
+      my $e;
       if ($mst->in_degree($i)==0) {
 	$qn->paste_on($query_tree);
 	push @roots,$qn;
       } else {
-	my ($e) = $mst->edges_to($i);
-	$p=$e->[0];
+	my ($edge) = $mst->edges_to($i);
+	$e = $edges{$edge->[0]}{$i};
 	if ($ORDER_SIBLINGS) {
-	  $qn->{'.edge_weight'}=$mst->get_edge_weight($e->[0],$e->[1]);
-	  $qn->paste_on($query_nodes->[$p],'.edge_weight');
+	  $qn->{'.edge_weight'}=$mst->get_edge_weight($edge->[0],$edge->[1]);
+	  $qn->paste_on($query_nodes->[$e->{real_start}],'.edge_weight');
 	} else {
-	  $qn->paste_on($query_nodes->[$p]);
+	  $qn->paste_on($query_nodes->[$e->{real_start}]);
 	}
       }
 
       # now turn the selected extra-relation into relation
       # of $qn
-      if (defined $p) {
- 	my $parent = $query_nodes->[$p];
-	my $ref = $edges{$p}{$i};
+      if (defined $e) {
+	my $ref = $e->{ref};
 	my $rel;
-	if (UNIVERSAL::isa($ref,'Fslib::Seq::Element')) {
-	  $rel = $ref;
-	  $ref = delete $rel->value->{reversed};
+	if ($e->{reverse_of_ref}) {
+	  $rel = $ref; # $ref is a 'Fslib::Seq::Element'
+	  $ref = $e->{reverse_of_ref};
 	} else {
 	  ($rel) = TredMacro::SeqV($ref->{relation});
 	}
@@ -3780,6 +3892,27 @@ sub select_matching_node {
 	$n ? [$n, $fsfile] : ()
       }
     } PMLInstance::get_all($node,$self->[ATTR])];
+  }
+}
+#################################################
+{
+  package MemberIterator;
+  use strict;
+  use base qw(SimpleListIterator);
+  use constant ATTR => SimpleListIterator::FIRST_FREE;
+  use Carp;
+  sub new {
+    my ($class,$conditions,$attr)=@_;
+    croak "usage: $class->new(sub{...},\$attr)" unless (ref($conditions) eq 'CODE' and defined $attr);
+    my $self = SimpleListIterator->new($conditions);
+    $self->[ATTR]=$attr;
+    bless $self, $class; # reblessing
+    return $self;
+  }
+  sub get_node_list  {
+    my ($self,$node)=@_;
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    return [map [$_,$fsfile], PMLInstance::get_all($node,$self->[ATTR])];
   }
 }
 #################################################

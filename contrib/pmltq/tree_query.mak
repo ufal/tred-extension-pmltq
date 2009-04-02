@@ -6,6 +6,7 @@ package Tree_Query::TrEd; # so that it gets reloaded
 package Tree_Query::Common; # so that it gets reloaded
 package Tree_Query::NG2PMLTQ; # so that it gets reloaded
 package Tree_Query::SQLEvaluator; # so that it gets reloaded
+
 package Tree_Query;
 {
 use strict;
@@ -717,11 +718,8 @@ style: <?
   my $name = $this->{'#name'};
   if ($this->parent->parent) {
     if ($name =~ /^(?:node|subquery|ref)$/) {
-      my ($rel) = map {
-        my $name = $_->name;
-        $name eq 'user-defined' ? $_->value->{label} : $name
-      } SeqV($this->{relation});
-      $rel||='child';
+      my $rel=Tree_Query::Common::rel_as_text($this) || 'child';
+      $rel=~s/{.*//;
       my $color = Tree_Query::arrow_color($rel);
       my $arrow = Tree_Query::arrow($rel);
       "#{Line-arrow:$arrow}".
@@ -749,12 +747,15 @@ xlabel:<?
 ?>
 style:<?
    my $name = $this->{'#name'};
-   if ($name eq 'node'
+   if ($name eq 'node' and Tree_Query::Common::IsMemberNode($this,$Tree_Query::SEARCH)) {
+    ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-4,4,4,4,0,-4}' : '#{Node-shape:rectangle}' ).
+     '#{Oval-fill:gray}#{Line-width:1}'
+   } elsif ($name eq 'node'
       and !(grep { ($_->{'#name'}||'node') ne 'node' } $this->ancestors)) {
      my $color = Tree_Query::NodeIndexInLastQuery($this);
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
      (defined($color) ? '#{Oval-fill:#'.$Tree_Query::colors[$color].'}' : '').
-     '#{Node-addheight:7}#{Line-arrowshape:14,20,4}'
+     '#{Line-arrowshape:14,20,4}'
    } elsif ($name eq 'node') {
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
      '#{Node-fill:brown}#{Line-arrowshape:14,20,4}'
@@ -954,11 +955,11 @@ sub init_id_map {
     @main_query_nodes{ Tree_Query::Common::FilterQueryNodes($tree) } = ();
   }
   %id = map {
-    my $n=lc($_->{name});
+    my $n=$_->{name};
     (defined($n) and length($n)) ? ($_=>$n) : ()
   } @nodes;
   %name2node_hash = map {
-    my $n=lc($_->{name});
+    my $n=$_->{name};
     (defined($n) and length($n)) ? ($n=>$_) : ()
   } @nodes;
   my $id = 'n0';
@@ -1029,26 +1030,29 @@ sub AssignRelation {
     return 1;
   }
 
-  my ($rel) = map { _rel_name($_,"%s (%s)") } SeqV($node->{relation});
+  my ($rel) = map _rel_name($_,'%2$s (%1$s)'), SeqV($node->{relation});
   my @sel=($rel||'child');
-  my $node_type = $node->parent->{'node-type'};
-  my $relations =
-    $SEARCH && $node_type ?
-      [ grep {
-	@{[GetRelativeQueryNodeType($node_type,
-				    $SEARCH,
-				    CreateRelation($_))]}>0
-				  } @{GetRelationTypes($node,$SEARCH)}
-				 ] : GetRelationTypes($node,$SEARCH);
+  my $node_type = Tree_Query::Common::GetQueryNodeType($node->parent);
+  my $relations = GetRelationTypes($node,$SEARCH,1);
+  if ($SEARCH && $node_type) {
+    @$relations = grep {
+      @{[GetRelativeQueryNodeType($node_type, $SEARCH, CreateRelation($_))]}>0
+    } @$relations;
+  }
+  # unshift @$relations,'member';
   return unless @$relations;
-  ListQuery('Select relation',
-	    'browse',
-	    $relations,
-	    \@sel,
-	    {
-	      label => { -text=> qq{Select relation of the current node to its parent} },
-	    }
-	   ) || return;
+  if (@$relations == 1) {
+    @sel=@$relations
+  } else {
+    ListQuery('Select relation',
+	      'browse',
+	      $relations,
+	      \@sel,
+	      {
+		label => { -text=> qq{Select relation of the current node to its parent} },
+	      }
+	     ) || return;
+  }
   SetRelation($node,$sel[0]) if @sel;
   if (@sel and $sel[0] eq 'descendant' or $sel[0] eq 'ancestor') {
     local $main::sortAttrs=0;
@@ -1067,10 +1071,18 @@ sub AssignType {
   my $node = $_[0] || $this;
   return 1 unless $SEARCH;
   return 1 if ( $node->parent && $node->{'#name'}!~/^(?:node|subquery)$/ );
-  my @types = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+  my @types;
+  if (Tree_Query::Common::IsMemberNode($node,$SEARCH)) {
+    if ($SEARCH) {
+      my $ptype = Tree_Query::Common::GetQueryNodeType($node->parent,$SEARCH);
+      @types = Tree_Query::Common::GetMemberPaths($ptype, $SEARCH);
+    }
+  } else {
+    @types = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+  }
   if (@types <= 1) {
     $node->{'node-type'} = $types[0];
-  } else {
+  } elsif (@types) {
     my @sel=$types[0];
     ListQuery('Select node type',
 	      'browse',
@@ -1166,10 +1178,12 @@ sub RenameInExpression {
 
 my %arrow = (
   # relation => 'first|last|both|none', # defaults to first
+  member => 'none',
 );
 
 # TODO: allow these colors to be defined by user
 my %color = (
+  'member' => '#aaa',
   'child' => 'black',
   'parent' => '#779',
   'descendant' => 'blue',
@@ -1267,11 +1281,9 @@ sub root_style_hook {
 	  $node->children;
     }
     for my $n (@refs) {
-      my ($rel) = map {
-	my $name = $_->name;
-	$name eq 'user-defined' ? $_->value->{label} : $name
-      } SeqV($n->{relation});
+      my $rel=Tree_Query::Common::rel_as_text($n);
       $rel||='child' if $n==$node;
+      $rel=~s/{.*//;
       next unless $rel;
       if ($n!=$node and $n->parent->{'#name'} eq 'not') {
 	$legend{'! '.$rel}=1
@@ -1324,7 +1336,7 @@ sub after_redraw_hook {
     my ($negate,$name) = ($r=~/^(!?\s*)(\S+)/);
     $c->createLine($scale * 75, $y, $scale * 15, $y,
 		   -fill => arrow_color($name),
-		   -width => 3*$scale,
+		   -width => $r eq 'member' ? $scale : 3*$scale,
 		   (-dash => $negate ? '-' : ''),
 		   -arrow => $arrow{$name}||'first',
 		   -arrowshape => [14,20,4],
@@ -1353,15 +1365,24 @@ sub node_style_hook {
   my $qn = first { $_->{'#name'} =~ /^(?:node|subquery)$/ } ($node,$node->ancestors);
   my $showHidden = $qn->{'.unhide'} || HiddenVisible();
   my $lw = $grp->treeView->get_lineWidth;
+  my $is_member_node = Tree_Query::Common::IsMemberNode($node,$SEARCH);
   if ($main_query{$node}) {
-    AddStyle($styles,'Node',
-	     -addheight=>7,
-	     -addwidth=>7,
-	    );
-    AddStyle($styles,'Line',
-	     -width=>2+$lw,
-	    );
-  } elsif ($node->{'#name'} =~ /^(?:node|subquery)$/) {
+    if ($is_member_node) {
+      AddStyle($styles,'Node',
+	       -addheight=>3,
+	       -addwidth=>3,
+	      );
+    } else {
+      AddStyle($styles,'Node',
+	       -addheight=>7,
+	       -addwidth=>7,
+	      );
+      AddStyle($styles,'Line',
+	       -width=>2+$lw,
+	      );
+    }
+  } elsif (!$is_member_node and 
+	   $node->{'#name'} =~ /^(?:node|subquery)$/) {
     AddStyle($styles,'Node',
 	     -addheight=>1,
 	     -addwidth=>1);
@@ -1384,7 +1405,7 @@ sub node_style_hook {
 	my $target = $ref->{target};
 	my $negate = ($node!=$ref && $ref->parent->{'#name'} eq 'not') ? 1 : 0;
 	scalar {
-	  -target => $name2node_hash{lc($target)},
+	  -target => $name2node_hash{$target},
 	  -fill   => $showHidden ? 'gray' : arrow_color($name),
 	  (-dash   => $negate ? '-' : ''),
 	  -raise => 8+16*(++$i),
@@ -1713,21 +1734,17 @@ sub EditRelationFromTo {
     and $type =~/^(?:node|subquery|ref)$/;
   return if cmp_subquery_scope($node,$target)<0;
   my @sel =
-    map _rel_name($_,"%s (%s)"),
-    map { SeqV($_->{relation}) }
+    map _rel_name($_->{relation},'%2$s (%1$s)'),
     grep { $_->{target} eq $target->{name} }
       ($type eq 'ref' ? $node : (grep $_->{'#name'} eq 'ref', $node->children));
-  my $node_type = $node->{'node-type'};
-  my $target_type = $target->{'node-type'};
-  my $relations =
-    $SEARCH && $node_type && $target_type ?
-      [ grep {
-	first { $_ eq $target_type }
-	  GetRelativeQueryNodeType($node_type,
-				   $SEARCH,
-				   CreateRelation($_))
-	} @{GetRelationTypes($node,$SEARCH)}
-       ] : GetRelationTypes($node,$SEARCH);
+  my $node_type = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+  my $target_type = Tree_Query::Common::GetQueryNodeType($target,$SEARCH);
+  my $relations = GetRelationTypes($node,$SEARCH,0);
+  if ($SEARCH && $node_type && $target_type) {
+    @$relations = grep {
+      first { $_ eq $target_type } @{[GetRelativeQueryNodeType($node_type, $SEARCH, CreateRelation($_))]}
+    } @$relations;
+  }
   return unless @$relations;
   ListQuery('Select relations',
 	    ($type eq 'ref' ? 'browse' : 'multiple'),
@@ -1755,12 +1772,12 @@ sub AddOrRemoveRelations {
   my $target_name = GetNodeName($target);
   my %types = map { $_=> 1 } @$types;
   my @refs =
-    grep { lc($_->{target}) eq lc($target_name) }
+    grep { $_->{target} eq $target_name }
     grep { $_->{'#name'} eq 'ref' } $node->children;
   for my $ref (@refs) {
     my ($rel)=SeqV($ref->{relation});
     if ($rel) {
-      my $rel_name = _rel_name($rel,"%s (%s)");
+      my $rel_name = _rel_name($rel,'%2$s (%1$s)');
       if ($opts->{-add_only}) {
 	delete $types{$rel_name}; # already have it
       } elsif (!$types{$rel_name}) {
@@ -2075,26 +2092,36 @@ $relation_re = qr/descendant|ancestor|child|parent|descendant|ancestor|depth-fir
 sub _find_type_in_query_string {
   my ($context,$rest)=@_;
   my ($type,$var);
-  my $user_defined = Tree_Query::Common::user_defined().'|';
+  my $user_defined = Tree_Query::Common::user_defined($SEARCH).'|';
   if ($context =~ /(${variable_re})\.$/) {
     $var = $1;
-    if (($context.$rest)=~/(?:(${user_defined}${relation_re})(?:\s+|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+    if (($context.$rest) =~ m{^(.*)\bmember(?:\s+|\s*::\s*|$)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)\s+\Q$var\E\s*:=\s*\[}s) {
+      $type = $2;
+      my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
+      $type = $prec.'/'.$type
+    } elsif (($context.$rest)=~/(?:(${user_defined}${relation_re})(?:\s+|\s*->\s*|\s*::\s*|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
       $type = $2;
     }
   } else {
     $context = reverse $context;
     my $depth = 0;
     while (length $context) {
+      my $prev = $context;
       $context =~ s/^[^]["']+|"(?:[^"\\]+|\\.)*"|'(?:[^'\\]+|\\.)*'//;
       if ($context=~s/^\[\s*//) {
 	last if $depth==0;
 	$depth--;
       }
       $depth++ if $context=~s/^\]\s*//;
+      return if $prev eq $context; # not a context for inserting anything
     }
     return unless length $context;
     $context=reverse $context;
-    if ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+    if ($context =~ m{^(.*)\bmember(?:\s+|$)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)(?:\s+|$)(?:(${variable_re})\s*:=)?$}) {
+      $type = $2;
+      my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
+      $type = $prec.'/'.$type
+    } elsif ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|\s*->\s*|\s*::\s*|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
       $type = $2;
     }
   }
@@ -2120,10 +2147,16 @@ sub _editor_offer_values {
   my ($ed,$operator) = @_;
   my @sel;
   my $context= $ed->get('0.0','insert');
-
+  my $eq;
   if ($SEARCH) {
-    if ($context=~s{(?:(${variable_re}\.)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)|(name)\(\s*(${variable_re})?\s*\))\s*!?$}{$1}) {
+    if ($context=~s{(?:(${variable_re}\.)?
+                       (${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)|
+                       (name)\(\s*(${variable_re})?\s*\)
+                    )
+                    ((?:\s*!?\s*=?|\s*!\s*in|\s+in)\s*)$
+                   }{$1}x) {
       my ($var,$attr,$is_name,$name_var) = ($1,$2,$3,$4);
+      $eq=$5;
       my ($type) = _find_type_in_query_string($context,
 					      $ed->get('insert','end'));
       my $decl = $SEARCH->get_decl_for($type);
@@ -2154,16 +2187,30 @@ sub _editor_offer_values {
 	  }
 	 )) {
 	  $ed->focus;
-	  $ed->Insert($operator.' ');
+	  $ed->delete('insert -'.length($eq).' chars','insert');
+	  if ($eq =~ /!/) {
+	    $ed->Insert(' !'.$operator.' ');
+	  } else {
+	    $ed->Insert(' '.$operator.' ');
+	  }
 	  return;
 	}
       }
     }
   }
+  if (!defined($eq) and $context =~ m{((?:\s*!?\s*=?|\s*!\s*in|\s+in)\s*)$}) {
+    $eq = $1;
+  };
   $ed->focus;
   @sel = map { $_=~/\D/ ? qq{"$_"} : $_ } @sel;
+  $ed->delete('insert -'.length($eq).' chars','insert');
+  if (defined($eq) and $eq =~ /!/) {
+    $ed->Insert(' !');
+  } else {
+    $ed->Insert(' ');
+  }
   if ($operator eq 'in') {
-    $ed->Insert(q( in { ).join(', ',@sel).q( } ));
+    $ed->Insert(q(in { ).join(', ',@sel).q( } ));
   } else {
     $ed->Insert($operator.' '.(@sel ? $sel[0] : ''))
   }
@@ -2215,13 +2262,14 @@ sub EditQuery {
 	       my $f = $d->add('Frame')->pack(-side=>'top',-expand => 'no');
 	       for (
 		 qw(? 3x),
-		 [Relation => undef, #[ map { /^(\S+)/ } @{GetRelationTypes($this)} ],
+		 ['Relation' => undef, #[ map { /^(\S+)/ } @{GetRelationTypes($this)} ],
 		  {
 		    -command => [
 		      sub {
-			my ($ed)=@_;
+			my ($ed,$qn)=@_;
 			my ($node_type) = _find_type_in_query_string($ed->get('0.0','insert'),
 								     $ed->get('insert','end'));
+			$node_type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
 			my $relations;
 			if ($SEARCH and defined $node_type and length $node_type) {
 			  $relations =
@@ -2229,11 +2277,12 @@ sub EditQuery {
 			      @{[GetRelativeQueryNodeType($node_type,
 							  $SEARCH,
 							  CreateRelation($_))]}>0
-							} @{GetRelationTypes($this,$SEARCH)}
+							} @{GetRelationTypes($this,$SEARCH,1)}
 						       ];
 			} else {
-			  $relations = GetRelationTypes($this,$SEARCH);
+			  $relations = GetRelationTypes($this,$SEARCH,1);
 			}
+			#unshift @$relations,'member';
 			return unless @$relations;
 			my @sel=['child'];
 			if (ListQuery('Select relation',
@@ -2245,40 +2294,71 @@ sub EditQuery {
 			  $ed->Insert($sel.' ');
 			}
 			$ed->focus;
-		      },$ed
+		      },$ed,$node
 		     ],
 		  }
 		 ],
-		 [Type => undef,
+		 ['Type' => undef,
 		  {
 		    -state => $SEARCH ? 'normal' : 'disabled',
 		    -command => [
 		      sub {
-			my ($ed)=@_;
+			my ($ed,$qn)=@_;
 			my $prev=$ed->get('0.0','insert');
 			my ($node_type) = _find_type_in_query_string($prev,
 								     $ed->get('insert','end'));
+			$node_type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
 			my $relation = 'child';
-			my $user_defined = Tree_Query::Common::user_defined();
-			if ($user_defined and $prev=~/(${user_defined})\s*$/) {
-			  $relation = $1.' (user-defined)';
-			} elsif ($prev=~/(${relation_re})\s*$/) {
+			my $user_defined = Tree_Query::Common::user_defined($SEARCH);
+			if ($prev=~/(${relation_re}|member)\s*(?:::)?$/) {
 			  $relation = $1;
+			} elsif ($user_defined and $prev=~/(${user_defined})\s*(?:->)?$/) {
+			  $relation = $1.' (user-defined)';
 			}
-			my @types=
-			  $node_type ?
-			  GetRelativeQueryNodeType($node_type,$SEARCH,CreateRelation($relation)) :
-			    @{$SEARCH->get_node_types};
+			my @types;
+			if ($relation eq 'member') {
+			  @types = Tree_Query::Common::GetMemberPaths($node_type, $SEARCH);
+			} elsif($node_type) {
+			  @types = GetRelativeQueryNodeType($node_type,$SEARCH,CreateRelation($relation));
+			} else {
+			  @types = @{$SEARCH->get_node_types};
+			}
 			if (@types==1) {
 			  $ed->Insert($types[0].' ');
-			} else {
+			} elsif (@types) {
 			  my @sel=[$types[0]];
 			  if (ListQuery('Select node type', 'browse', \@types, \@sel)) {
 			    $ed->Insert($sel[0].' ');
 			  }
 			}
 			$ed->focus;
-		      },$ed
+		      },$ed,$node
+		     ],
+                  }
+		 ],
+		 ['Member' => undef,
+		  {
+		    -state => $SEARCH ? 'normal' : 'disabled',
+		    -command => [
+		      sub {
+			my ($ed,$qn)=@_;
+			my $prev=$ed->get('0.0','insert');
+			my ($node_type) = _find_type_in_query_string($prev,
+								     $ed->get('insert','end'));
+			$node_type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
+			my @types = Tree_Query::Common::GetMemberPaths($node_type, $SEARCH);
+			if (@types==1) {
+			  $ed->Insert(' member '.$types[0].' [  ]');
+			  $ed->SetCursor('insert - 2 chars');
+			} elsif (@types) {
+			  my @sel=[$types[0]];
+			  if (ListQuery('Select node type', 'browse', \@types, \@sel)) {
+			    $ed->Insert(' member '.$sel[0].' [  ]');
+			    $ed->SetCursor('insert - 2 chars');
+			  }
+			}
+			$ed->focus;
+		      },$ed,$node
 		     ],
                   }
 		 ],
@@ -2316,10 +2396,12 @@ sub EditQuery {
 		    -underline => 5,
 		    -command =>
 		      [sub {
-			 my ($ed)=@_;
-			 my ($type,$var) = _find_type_in_query_string($ed->get('0.0','insert'),
+			 my ($ed,$qn)=@_;
+			 my $context = $ed->get('0.0','insert');
+			 my ($type,$var) = _find_type_in_query_string($context,
 								      $ed->get('insert','end'));
 			 if (defined $type and length $type) {
+			   $type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$type if $type=~m{^/};
 			   my $decl = $SEARCH->get_decl_for($type);
 			   if ($decl) {
 			     my @res = map { my $t = $_; $t=~s{#content}{[]}g; $t } $decl->get_paths_to_atoms({ no_childnodes => 1 });
@@ -2337,20 +2419,25 @@ sub EditQuery {
 					       list=>{ -exportselection => 0 }
 					     }
 					    )) {
+				 if (!$var and $context=~/[[:alnum:]"'}\)\]]\s*$/ and
+				       $context!~/\b(and|or|div|mod|sort\s*by|over|give|for)\s*$/) {
+				   $ed->Insert(',');
+				 }
 				 $ed->Insert(($var ? '' :' ').$sel[0].' ');
 			       }
 			     }
 			   }
 			 }
 			 $ed->focus;
-		       },$ed]
+		       },$ed,$node]
 		     }
 		 ],
+		 ['!','!'],
 		 ['= (equals)',undef,{-command => [\&_editor_offer_values,$ed,'=']}],
 		 ['in { ... }',undef,{-command => [\&_editor_offer_values,$ed,'in']}],
 		 ['~ (regexp)' => '~'],
 		 qw|< >|,
-		 [Function => [#map { $_.'()' }
+		 ['Function' => [#map { $_.'()' }
 				 sort
 				   qw(
 				       descendants(#NODE?#)
@@ -2379,8 +2466,7 @@ sub EditQuery {
 				    )
 				  ]],
 		 "\n",
-		 qw|, and or ()|,
-		 ['!','!'],
+		 qw|, and or () !()|,
 		 [q|"..."| => q|""|],
 		 [q|'...'|=> q|''|],
 		 qw|+ - * / ^ $|,
@@ -2549,7 +2635,14 @@ sub AddNode {
     DetermineNodeType($new);
   }
   if ($new and $new->{'#name'} =~ /^(?:node|subquery)/) {
-    unless ($node->parent ? AssignRelation($new) : AssignType($new)) {
+    my $ok = 1;
+#    if (Tree_Query::Common::IsMemberNode($node,$SEARCH)) {
+#      SetRelation($new,'member');
+#      $ok=AssignType($new);
+#    } else {
+      $ok = ($node->parent ? AssignRelation($new) : AssignType($new));
+#    }
+    unless ($ok) {
       DeleteLeafNode($new);
       $this=$node;
     }
