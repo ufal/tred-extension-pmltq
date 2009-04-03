@@ -74,13 +74,18 @@ sub show_result {
       $grp=$win;
       my $idx = GetMinorModeData('Tree_Query_Results','index');
       local $win->{noRedraw}=1;
+      my $result_fn;
       if (!defined($idx) or $idx>$#{$self->{current_result}}) {
 	$idx = $self->_assign_first_result_index_not_shown($seen,$win);
 	SetMinorModeData('Tree_Query_Results','index',$idx);
       }
       if (defined $idx) {
 	my $result_fn = $self->get_nth_result_filename($idx);
-	Open($result_fn,{-keep_related=>1});
+	if (defined($result_fn) and length($result_fn)) {
+	  Open($result_fn,{-keep_related=>1});
+	} else {
+	  CloseFileInWindow($win);
+	}
       } else {
 	CloseFileInWindow($win);
       }
@@ -140,7 +145,7 @@ sub _assign_first_result_index_not_shown {
   for my $i (0..$#{$cur_res}) {
     next if $seen->{$i};
     my $m = $cur_res->[$i];
-    if ($m=~/^(([^#]+)(?:\#\#\d+))/g) {
+    if (defined $m and $m=~/^(([^#]+)(?:\#\#\d+))/g) {
       if (!$seen->{$2}) {
 	$seen->{$i}=$win;
 	$seen->{$2}=$win;
@@ -153,7 +158,7 @@ sub _assign_first_result_index_not_shown {
   for my $i (0..$#{$cur_res}) {
     next if $seen->{$i};
     my $m = $cur_res->[$i];
-    if ($m=~/^(([^#]+)(?:\#\#\d+))/g) {
+    if (defined $m and $m=~/^(([^#]+)(?:\#\#\d+))/g) {
       return $i if !$seen->{$2};
       if (!$seen->{$1}) {
 	$seen->{$i}=$win;

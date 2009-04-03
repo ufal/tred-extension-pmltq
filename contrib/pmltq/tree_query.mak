@@ -498,6 +498,12 @@ Bind sub { Search({no_filters=>1}) } => {
   changing_file => 0,
 };
 
+Bind sub { Search({no_filters=>1, count=>1 }) } => {
+  key => 'Ctrl+space',
+  menu => 'Count matches',
+  changing_file => 0,
+};
+
 Bind sub {  $SEARCH && $SEARCH->show_current_result } => {
   key => 'm',
   menu => 'Show Match',
@@ -1995,6 +2001,18 @@ sub CreateSearchToolbar {
 		'search',
 		'Find first match, ignore output filters (Shift+space)',
 	       ],
+	       ['Count' =>
+		    sub{
+		      my $s = GetSearch($ident);
+		      if ($s) {
+			SetSearch($s);
+			$s->search_first({ no_filters=>1, count=>1 });
+		      }
+		      ChangingFile(0);
+		    },
+		'search_count',
+		'Count occurrences (Ctrl+space)',
+	       ],
 	       ['Previous match' =>
 		      sub{
 			my $s = GetSearch($ident);
@@ -2476,7 +2494,7 @@ sub EditQuery {
 		    ? ()
 		    : (qw| >> |,
                        [q|Grouping: for/give/sort by| => qq|for ...\n    give distinct ...\n    sort by ...|],
-		       ['Analytic function' => [map { $_.'()' }
+		       ['Aggregation function' => [map { $_.'()' }
 						  sort
 						    qw( min max sum avg count ratio concat )
 						   ]]),

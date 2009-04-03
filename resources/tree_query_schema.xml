@@ -62,6 +62,13 @@
       </attribute>
     </container>
   </derive>
+  <derive name="q-member-relation.type" type="q-base-relation.type">
+    <container>
+      <attribute name="label">
+	<constant>member</constant>
+      </attribute>
+    </container>
+  </derive>
   <derive name="q-parent-relation.type" type="q-child-relation.type">
     <container>
       <attribute name="label">
@@ -112,7 +119,7 @@
 
 
   <type name="q-relation.type">
-    <sequence content_pattern="(child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-tree-as)?">
+    <sequence content_pattern="(member|child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-tree-as)?">
       <element name="same-tree-as" type="q-same-tree-as.type"/>
       <element name="depth-first-precedes" type="q-depth-first-precedes.type"/>
       <element name="depth-first-follows" type="q-depth-first-follows.type"/>
@@ -122,6 +129,7 @@
       <element name="parent" type="q-parent-relation.type"/>
       <element name="child" type="q-child-relation.type"/>
       <element name="descendant" type="q-descendant-relation.type"/>
+      <element name="member" type="q-member-relation.type"/>
       <element name="user-defined" type="q-user-relation.type"/> 
     </sequence>
   </type>
@@ -155,7 +163,7 @@
 	<cdata format="ID"/>
       </member>
       <member name="description"><cdata format="any"/></member>
-      <member name="node-type"><cdata format="NMTOKEN"/></member>
+      <member name="node-type"><cdata format="token"/></member>
       <member name="q-nodes" role="#CHILDNODES">
 	<sequence>
 	  <element name="node" type="q-node.type"/>

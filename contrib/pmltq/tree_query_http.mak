@@ -132,7 +132,17 @@ sub search_first {
     resolve_types=>1,
     no_filters => $opts->{no_filters},
   }) if ref($query);
-  my ($limit, $row_limit) = map { int($opts->{$_}||$self->{config}{pml}->get_root->get_member($_)||0)||$DEFAULTS{$_} } qw(limit row_limit);
+  my ($limit, $row_limit) =
+    $opts->{count} ? (0,1) :
+    map { $opts->{$_}||$self->{config}{pml}->get_root->get_member($_) } qw(limit row_limit);
+  for (qw(limit row_limit)) {
+    $opts->{$_} = $DEFAULTS{$_} unless defined($opts->{$_}) and length($opts->{$_});
+    $opts->{$_} = int($opts->{$_});
+  }
+
+  if ($opts->{count}) {
+    $query.="\n>> count()";
+  }
   my $timeout = int($opts->{timeout}||$self->{spinbox_timeout}) || $DEFAULTS{timeout};
   my $t0 = new Benchmark;
 

@@ -414,6 +414,7 @@ sub search_first {
 							type_mapper => $self,
 							current_filelist => $self->{filelist} ? 1 : 0,
 							no_filters => $opts->{no_filters},
+							count => $opts->{count},
 						      });
   $self->{current_result} = undef;
   $self->{past_results}=[];
@@ -422,7 +423,7 @@ sub search_first {
   $self->{currentFilePos} = 0;
   $self->{currentFilelistPos} = 0;
 
-  if ($self->{evaluator}{filters} and !$opts->{no_filters}) {
+  if ($self->{evaluator}{filters} and (!$opts->{no_filters} or $opts->{count})) {
     my $canvas = ToplevelFrame()->Canvas();
     my $search_win= TrEd::Window->new(TrEd::TreeView->new($canvas),framegroup=>$grp->{framegroup}); # main::newTreeView(TrEd())
     $search_win->{macroContext}='TredMacro';
@@ -934,13 +935,13 @@ sub select_matching_node {
       push @iterators, $iterator;
       $all_iterators->[$self->{pos2match_pos}[$i]]=$iterator;
     }
-    unless ($self->{parent_query} or $opts->{no_filters}) {
+    unless ($self->{parent_query} or ($opts->{no_filters} and !$opts->{count})) {
       my $first = first { $_->{'#name'} eq 'node' and $_->{name} } $query_tree->children;
       my $output_opts = {
 	id => $first->{name},
       };
       my ($init_code,$filters) = $self->serialize_filters(
-	$query_tree->{'output-filters'},
+	($opts->{count} ? Fslib::List->new({ 'return' => Fslib::List->new('count()') }) : $query_tree->{'output-filters'}),
 	$output_opts,
       );
       if ($init_code and @$filters) {
