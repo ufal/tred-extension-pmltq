@@ -2773,7 +2773,14 @@ sub ShowResultTable {
   my $t= $d->Scrolled('ROText', qw/-relief sunken -borderwidth 2 -height 20 -scrollbars oe/);
   $t->insert('0.0', join('',map { join("\t",@$_)."\n" } @$results));
   $t->pack(qw/-side top -expand yes -fill both/);
-  $t->TextSearchLine(-parent => $d, -label=>'S~earch')->pack(qw(-fill x));
+  eval {
+    $t->TextSearchLine(-parent => $d,
+		       -label=>'S~earch',
+		       -prev_img =>icon('16x16/up'),
+		       -next_img =>icon('16x16/down'),
+		      )->pack(qw(-fill x));
+  };
+  print STDERR $@ if $@;
   $t->Subwidget('xscrollbar')->configure(qw(-takefocus 0));
   $t->Subwidget('yscrollbar')->configure(qw(-takefocus 0));
   $t->BindMouseWheelVert();
