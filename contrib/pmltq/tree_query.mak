@@ -438,6 +438,17 @@ DeclareMinorMode 'Tree_Query_Results' => {
   }
 };
 
+Bind({command=>'Undo',
+      key => 'Ctrl+z',
+      menu=>'Undo',
+      changing_file => 0,
+    });
+Bind({command=>'Redo',
+      key => 'Ctrl+Z',
+      menu=>'Redo',
+      changing_file => 0,
+    });
+
 Bind({
   command => sub {
     ChangingFile(0);
@@ -2273,7 +2284,9 @@ sub EditQuery {
     my $time = timestr(timediff($t1,$t0));
     print "creating parser took: $time\n";
   }
-  my $qopts={$node->parent ? (-cursor => 'end - 3 chars') : (),
+  my $qopts={
+    -widget => ['TextUndo', -background => 'white'],
+    $node->parent ? (-cursor => 'end - 3 chars') : (),
 	     -height => 16,
 	     -init => sub {
 	       my ($d,$ed)=@_;
@@ -2437,6 +2450,8 @@ sub EditQuery {
 					       list=>{ -exportselection => 0 }
 					     }
 					    )) {
+				 $ed->deleteSelected;
+				 $context = $ed->get('0.0','insert');
 				 if (!$var and $context=~/[[:alnum:]"'}\)\]]\s*$/ and
 				       $context!~/\b(and|or|div|mod|sort\s*by|over|give|for)\s*$/) {
 				   $ed->Insert(',');
@@ -2468,7 +2483,7 @@ sub EditQuery {
 				       upper(#STR#)
 				       length(#STR#)
 				       substr(#STR#,OFFSET,LEN?),
-				       tr(#STR,CHARS_TO_REPLACE#,REPLACEMENT_CHARS)
+				       tr(#STR#,CHARS_TO_REPLACE,REPLACEMENT_CHARS)
 				       replace(#STR#,SUBSTR,REPLACEMENT)
 				       ciel(#NUM#)
 				       floor(#NUM#)
@@ -2479,8 +2494,8 @@ sub EditQuery {
 				       file(#NODE?#)
 				       tree_no(#NODE?#)
 				       address(#NODE?#)
-				       substitute(#STR,REGEXP#,REPLACEMENT,FLAGS?)
-				       match(#STR,REGEXP#,FLAGS?)
+				       substitute(#STR#,REGEXP,REPLACEMENT,FLAGS?)
+				       match(#STR#,REGEXP,FLAGS?)
 				    )
 				  ]],
 		 "\n",
@@ -2521,13 +2536,20 @@ sub EditQuery {
 		     $menubutton->command(-label => $_,
 					  (defined $ul->{$_} ? (-underline => $ul->{$_}) : ()),
 					  -command =>
-					    [ sub { 
-						if ($_[1]=~s/#(.*)#(.*)/$1$2/) {
-						  $_[0]->Insert($_[1]);
-						  $_[0]->SetCursor('insert -'.length($2).' chars');
-						  $_[0]->tagAdd('sel','insert-'.length($1).' chars','insert');
+					    [ sub {
+						my ($ed,$text)=@_;
+						$ed->deleteSelected;
+						my $context = $ed->get('0.0','insert');
+						if ($context=~/[[:alnum:]"'}\)\]]\s*$/ and
+						    $context!~/\b(and|or|div|mod|sort\s*by|over|give|for)\s*$/) {
+						  $ed->Insert(',');
+						}
+						if ($text=~s/#(.*)#(.*)/$1$2/) {
+						  $ed->Insert($text);
+						  $ed->SetCursor('insert -'.length($2).' chars');
+						  $ed->tagAdd('sel','insert-'.length($1).' chars','insert');
 						} else {
-						  $_[0]->Insert($_[1]);
+						  $ed->Insert($text);
 						}
 					      },
 					      $ed,' '.$_.' ' ]
