@@ -342,30 +342,52 @@ sub get_decl_for {
 }
 
 sub get_specific_relations {
-  my ($self)=@_;
-  return $self->{specific_relations} if $self->{specific_relations};
-  my $res = $self->request('relations',[format=>'text']);
-  unless ($res->is_success) {
-    ErrorMessage($res->status_line, "\n");
-    return [];
+  my ($self,$type)=@_;
+  if ($type) {
+    return $self->{type_specific_relations}{$type} if $self->{type_specific_relations} and $self->{type_specific_relations}{$type};
+    my $res = $self->request('relations',
+			     [format=>'text',
+			      type=>$type,
+			     ]);
+    unless ($res->is_success) {
+      ErrorMessage($res->status_line, "\n");
+      return [];
+    }
+    return $self->{type_specific_relations}{$type}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
+  } else {
+    return $self->{specific_relations} if $self->{specific_relations};
+    my $res = $self->request('relations',
+			     [format=>'text',
+			      (defined($type) ? (type=>$type) : ())
+			     ]);
+    unless ($res->is_success) {
+      ErrorMessage($res->status_line, "\n");
+      return [];
+    }
+    return $self->{specific_relations}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
   }
-  return $self->{specific_relations}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
 }
 
 sub get_relation_target_type {
   my ($self,$node_type,$relation)=@_;
   my $rels = $self->{specific_relation_map};
-  unless ($rels) {
-    my $res = $self->request('relation_target_types',[format=>'text']);
+  unless ($rels and $rels->{$node_type}) {
+    my $res = $self->request('relation_target_types',
+			     [
+			       format=>'text',
+			       type => $node_type,
+			     ]);
     unless ($res->is_success) {
       ErrorMessage($res->status_line, "\n");
       return;
     }
-    $self->{specific_relation_map} = $rels = {};
+    my $R = {};
+    $self->{specific_relation_map}{$node_type} = $R;
     for my $line (split /\r?\n/, Encode::decode_utf8($res->content,1)) {
       my ($type,$rel,$target)=split /:/,$line,3;
-      $rels->{$type}{$rel}=$target;
+      $R->{$rel}=$target if $type eq $node_type;
     }
+    return $R->{$relation};
   }
   return $rels->{$node_type}{$relation};
 }
