@@ -53,7 +53,7 @@ sub show_result {
 	unless ($seen->{$idx}) {
 	  # this node is not shown in any window
 	    my $m = $self->{current_result}[$idx];
-	    if ($m=~/^(([^#]+)(?:\#\#\d+))/g) {
+	    if ($m and $m=~/^(([^#]+)(?:\#\#\d+))/g) {
 	      my $win = $seen->{$1}||$seen->{$2};
 	      if ($win) {
 		SetMinorModeData('Tree_Query_Results','index',$idx,$win);
