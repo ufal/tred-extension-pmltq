@@ -1472,7 +1472,7 @@ sub line_click_hook {
 sub node_release_hook {
   my ($node,$target,$mod)=@_;
   return unless $target;
-  #print STDERR "NODE_RELEASE_HOOK: $mod, $node->{'#name'}, $target->{'#name'}, $node->{optional}\n";
+  # print STDERR "NODE_RELEASE_HOOK: $mod, $node->{'#name'}, $target->{'#name'}, $node->{optional}\n";
   my $old_parent;
   if ($node->{'#name'} =~ /^(node|subquery)$/) {
     $old_parent = $node->parent;
@@ -1748,15 +1748,24 @@ sub EditRelationFromTo {
   my $type = $node->{'#name'};
   my $target_is = $target->{'#name'};
   return unless $target_is =~/^(?:node|subquery)$/
-    and $type =~/^(?:node|subquery|ref)$/;
+    and $type =~/^(?:node|subquery|not|and|or|ref)$/;
   return if cmp_subquery_scope($node,$target)<0;
   my @sel =
     map _rel_name($_->{relation},'%2$s (%1$s)'),
     grep { $_->{target} eq $target->{name} }
       ($type eq 'ref' ? $node : (grep $_->{'#name'} eq 'ref', $node->children));
-  my $node_type = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+  my $node_type;
+  my $relations;
+  if ($type =~/^(?:node|subquery)$/) {
+    $node_type = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+    $relations = GetRelationTypes($node,$SEARCH,0);
+  } else {
+    my $n = $node->parent;
+    $n=$n->parent while $n->{'#name'} =~/^(?:node|subquery)$/;
+    $node_type = Tree_Query::Common::GetQueryNodeType($n,$SEARCH);
+    $relations = GetRelationTypes($n,$SEARCH,0);
+  }
   my $target_type = Tree_Query::Common::GetQueryNodeType($target,$SEARCH);
-  my $relations = GetRelationTypes($node,$SEARCH,0);
   if ($SEARCH && $node_type && $target_type) {
     @$relations = grep {
       first { $_ eq $target_type } @{[GetRelativeQueryNodeType($node_type, $SEARCH, CreateRelation($_))]}
@@ -1772,13 +1781,13 @@ sub EditRelationFromTo {
 	    }
 	   ) || return;
   init_id_map($node->root);
-  if ($type eq 'node' or $type eq 'subquery') {
-    AddOrRemoveRelations($node,$target,\@sel,{-add_only=>0});
-    return 1;
-  } elsif ($type eq 'ref') {
+  if ($type eq 'ref') {
     $node->{target}=GetNodeName($target);
     SetRelation($node,$sel[0]) if @sel;
     return 1 if @sel
+  } else {
+    AddOrRemoveRelations($node,$target,\@sel,{-add_only=>0});
+    return 1;
   }
   return;
 }
