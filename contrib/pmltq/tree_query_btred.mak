@@ -573,9 +573,13 @@ sub get_result_windows {
   if (!@wins) {
     if ($self->{file}) {
       @wins = map { $_->[0] } grep { $_->[1]->filename eq $self->{file} }
-	grep ref($_->[1]), map [$_,CurrentFile($_)], TrEdWindows();
+	grep ref($_->[1]), map [$_,CurrentFile($_)],
+	grep { $_ != $grp }
+	TrEdWindows();
     } else {
-      @wins = map { $_->[0] } grep { $_->[1]->name eq $self->{filelist} } grep ref($_->[1]), map [$_,GetCurrentFileList($_)], TrEdWindows();
+      @wins = map { $_->[0] } grep { $_->[1]->name eq $self->{filelist} } grep ref($_->[1]), map [$_,GetCurrentFileList($_)],
+	grep { $_ != $grp }
+	TrEdWindows();
     }
     EnableMinorMode('Tree_Query_Results',$_) for @wins;
   }
