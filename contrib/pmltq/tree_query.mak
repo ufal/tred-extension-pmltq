@@ -1050,7 +1050,7 @@ sub AssignRelation {
   my ($rel) = map _rel_name($_,'%2$s (%1$s)'), SeqV($node->{relation});
   my @sel=($rel||'child');
   my $node_type = Tree_Query::Common::GetQueryNodeType($node->parent);
-  my $relations = GetRelationTypes($node,$SEARCH,1);
+  my $relations = GetRelationTypes($node->parent,$SEARCH,1);
   if ($SEARCH && $node_type) {
     @$relations = grep {
       @{[GetRelativeQueryNodeType($node_type, $SEARCH, CreateRelation($_))]}>0
