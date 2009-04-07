@@ -275,7 +275,7 @@ sub select_matching_node {
     my $fsfile = $win->{FSFile};
     next unless $fsfile;
     my $fn = $fsfile->filename.'##'.($win->{treeNo}+1);
-    next unless $result =~ /\Q$fn\E\.(\d+)$/;
+    next unless $result and $result =~ /\Q$fn\E\.(\d+)$/;
     my $pos = $1;
     my $r=$fsfile->tree($win->{treeNo});
     for (1..$pos) {
