@@ -1203,8 +1203,10 @@ my %color = (
   'member' => '#aaa',
   'child' => 'black',
   'parent' => '#779',
-  'descendant' => 'blue',
-  'ancestor' => 'lightblue',
+  'descendant' => 'black',
+  'ancestor' => '#779',
+#  'descendant' => 'blue',
+#  'ancestor' => 'lightblue',
   'same-tree-as' => '#eea',
   'depth-first-precedes' => 'red3',
   'depth-first-follows' => 'red4',
@@ -1224,7 +1226,18 @@ my %color = (
   'compl' => '#629F52',
   'compl.rf' => '#629F52',
   'eparent' => 'green',
-  'echild' => '#66b032', # color[0]
+  'echild' => '#a6d052', # color[0]
+);
+
+my %dash = (
+  'normal' => '',
+  '!' => '8,6',
+  '{' => '12,2',
+  'ancestor' => '12,2',
+  'descendant' => '12,2',
+  '!{' => '12,3,4,3',
+  '!ancestor' => '12,3,4,3',
+  '!descendant' => '12,3,4,3',
 );
 my $free_arrow_color = 1; # color[0] taken by echild
 my %assigned_colors;
@@ -1239,6 +1252,10 @@ sub arrow_color {
 sub arrow {
   my $rel = shift;
   return $arrow{$rel} || 'first';
+}
+sub arrow_dash {
+  my ($rel,$node) = @_;
+  return $dash{$rel} || '';
 }
 
 sub get_nodelist_hook {
@@ -1300,7 +1317,7 @@ sub root_style_hook {
     for my $n (@refs) {
       my $rel=Tree_Query::Common::rel_as_text($n);
       $rel||='child' if $n==$node;
-      $rel=~s/{.*//;
+      $rel=~s/{\d*,\d*}/{n,m} (transitive)/;
       next unless $rel;
       if ($n!=$node and $n->parent->{'#name'} eq 'not') {
 	$legend{'! '.$rel}=1
@@ -1349,12 +1366,18 @@ sub after_redraw_hook {
 		   -tags=>['legend','text_item'] );
     $y+=$scale * (2+($hint=~y/\n/\n/)) * $fh;
   }
-  for my $r ( sort keys %legend ) {
-    my ($negate,$name) = ($r=~/^(!?\s*)(\S+)/);
+  my $lw = $grp->treeView->get_lineWidth;
+  $lw=2 if $lw<2;
+
+  my @l = sort { $a->[2] cmp $b->[2] or $a->[1] cmp $b->[1] or $a->[3] cmp $b->[3] }
+         map { [$_,(/^(!?\s*)([^\s\{]+)(\{)?/)] } keys %legend;
+  for my $legend (@l) {
+    my ($r,$negate,$name,$transitive) = @$legend;
+    $transitive||='';
     $c->createLine($scale * 75, $y, $scale * 15, $y,
 		   -fill => arrow_color($name),
-		   -width => $r eq 'member' ? $scale : 3*$scale,
-		   (-dash => $negate ? '-' : ''),
+		   -width => $r eq 'member' ? $scale : $lw*$scale,
+		   (-dash => [split ',',($negate ? $dash{'!'.$name.$transitive}||$dash{'!'.$transitive} : $dash{$name.$transitive}||$dash{$transitive}||'')]),
 		   -arrow => $arrow{$name}||'first',
 		   -arrowshape => [14,20,4],
 		   -tags => ['scale_width','legend']
@@ -1382,6 +1405,7 @@ sub node_style_hook {
   my $qn = first { $_->{'#name'} =~ /^(?:node|subquery)$/ } ($node,$node->ancestors);
   my $showHidden = $qn->{'.unhide'} || HiddenVisible();
   my $lw = $grp->treeView->get_lineWidth;
+  $lw=2 if $lw<2;
   my $is_member_node = Tree_Query::Common::IsMemberNode($node,$SEARCH);
   if ($main_query{$node}) {
     if ($is_member_node) {
@@ -1395,7 +1419,7 @@ sub node_style_hook {
 	       -addwidth=>7,
 	      );
       AddStyle($styles,'Line',
-	       -width=>2+$lw,
+	       -width=>1+$lw,
 	      );
     }
   } elsif (!$is_member_node and 
@@ -1404,7 +1428,7 @@ sub node_style_hook {
 	     -addheight=>1,
 	     -addwidth=>1);
     AddStyle($styles,'Line',
-	     -width=>2+$lw,
+	     -width=>1+$lw,
 	    );
   }
   if ($showHidden) {
@@ -1421,18 +1445,22 @@ sub node_style_hook {
 	$name = $_->value->{label} if $name eq 'user-defined';
 	my $target = $ref->{target};
 	my $negate = ($node!=$ref && $ref->parent->{'#name'} eq 'not') ? 1 : 0;
+	my $text = Tree_Query::Common::rel_as_text($ref);
 	scalar {
 	  -target => $name2node_hash{$target},
 	  -fill   => $showHidden ? 'gray' : arrow_color($name),
-	  (-dash   => $negate ? '-' : ''),
+	  (-dash   => $negate ?
+	     (($text=~/^(\S+){/) ? $dash{'!'.$1}||$dash{'!{'} : $dash{'!'.$text}||$dash{'!'})
+	     : (($text=~/^(\S+){/) ? $dash{$1}||$dash{'{'} : $dash{$text}||'')),
 	  -raise => 8+16*(++$i),
+	  -hint => $text,
 	  -tag => 'relation:'.$ref,
 	}
       } SeqV($ref->attr('relation'))
      ], {
        -arrow => 'last',
        -arrowshape => '14,20,4',
-       -width => $showHidden ? $lw : $lw+1,
+       -width => $showHidden ? $lw-1 : $lw,
        -smooth => 1,
      });
   }
