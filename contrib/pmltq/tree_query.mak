@@ -2293,6 +2293,7 @@ sub EditQuery {
     my $time = timestr(timediff($t1,$t0));
     print "creating parser took: $time\n";
   }
+  eval { require Tk::TextUndo; };
   my $qopts={
     -widget => ['TextUndo', -background => 'white'],
     $node->parent ? (-cursor => 'end - 3 chars') : (),

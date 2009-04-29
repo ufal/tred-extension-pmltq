@@ -79,6 +79,12 @@
   <derive name="q-user-relation.type" type="q-base-relation.type">
     <container>
       <attribute required="1" name="label" type="q-user-relation-choice.type"/>
+      <attribute name="min_length">
+	<cdata format="positiveInteger"/>
+      </attribute>
+      <attribute name="max_length">
+	<cdata format="positiveInteger"/>
+      </attribute>
     </container>
   </derive>
   <derive name="q-depth-first-precedes.type" type="q-base-relation.type">
