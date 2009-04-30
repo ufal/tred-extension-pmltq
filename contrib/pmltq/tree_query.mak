@@ -46,6 +46,12 @@ Bind 'Tree_Query->NewQuery' => {
 };
 our $ng_string;
 
+my $insert_key='Insert';
+if ($^O eq 'darwin') {
+  # there is no Insert key on Mac
+  $insert_key = 'i';
+}
+
 my @TOOLBAR_BINDINGS = (
   {
     command => sub {
@@ -140,19 +146,19 @@ my @TOOLBAR_BINDINGS = (
    },
   {
     command => 'copy_to_clipboad',
-    key => 'Ctrl+Insert',
+    key => 'Ctrl+'.$insert_key,
     menu => 'Copy subtree to clipboard',
     toolbar => ['Copy', 'editcopy'],
   },
   {
     command => sub { PasteClipboardWithRename(); copy_to_clipboad() },
-    key => 'Shift+Insert',
+    key => 'Shift+'.$insert_key,
     menu => 'Paste subtree from clipboard',
     toolbar => ['Paste', 'editpaste'],
   },
   {
     command => 'paste_as_new_tree',
-    key => 'Ctrl+Shift+Insert',
+    key => 'Ctrl+Shift+'.$insert_key,
     menu => 'Paste as new tree',
     toolbar => ['Paste New Tree', 'editpaste'],
   },
@@ -187,7 +193,7 @@ my @TOOLBAR_BINDINGS = (
 
   {
    command => 'AddNode',
-   key => 'Insert',
+   key => $insert_key,
    menu => 'Create a new query node',
    toolbar => ['Add node', 'add_node'],
   },
@@ -1355,7 +1361,7 @@ sub after_redraw_hook {
   }
   unless ($root and $root->firstson) {
     $hint .= qq{\n} if $hint;
-    $hint .= qq{QUERY IS EMPTY!\nPressing 'Insert' to create the first query node, or 'e' to open the query editor!\n}
+    $hint .= qq{QUERY IS EMPTY!\nPressing '$insert_key' to create the first query node, or 'e' to open the query editor!\n}
   }
   if (length $hint) {
     chomp $hint;
