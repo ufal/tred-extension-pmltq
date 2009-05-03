@@ -604,7 +604,7 @@ sub icon {
   }
   my $file = File::Spec->catfile(CallerDir(),'icons',$name.'.png');
   if (-r $file) {
-    return $icons{$name} = ToplevelFrame()->Photo(-format => 'png', -file => $file);
+    return $icons{$name} = ToplevelFrame()->Photo('pmltq_'.$name,-format => 'png', -file => $file);
   } else {
     return $icons{$name} = main::icon($grp->{framegroup}, $name)
   }
@@ -1299,6 +1299,7 @@ sub get_nodelist_hook {
 
 my (%legend,%main_query);
 our $no_legend;
+our $stop_img;
 sub root_style_hook {
   my ($root,$styles,$Opts)=@_;
   DrawArrows_init();
@@ -1308,7 +1309,7 @@ sub root_style_hook {
   my $hv = HiddenVisible();
   %main_query = map { $_=>1 } Tree_Query::Common::FilterQueryNodes($root);
   return if $no_legend;
-
+  icon('process-stop');
   for my $node (@nodes) {
     my @refs;
     my $qn = first { $_->{'#name'} =~ /^(?:node|subquery)$/ } ($node,$node->ancestors);
@@ -1452,9 +1453,16 @@ sub node_style_hook {
 	my $target = $ref->{target};
 	my $negate = ($node!=$ref && $ref->parent->{'#name'} eq 'not') ? 1 : 0;
 	my $text = Tree_Query::Common::rel_as_text($ref);
+	my $color = $showHidden ? 'gray' : arrow_color($name);
 	scalar {
 	  -target => $name2node_hash{$target},
-	  -fill   => $showHidden ? 'gray' : arrow_color($name),
+	  -fill   => $color,
+#	  (-object => $negate ? 'shape=image;image=pmltq_process-stop;ratio=0.6;coords=0,0' : ''),
+# 	  (-object => $negate ? 'shape=text;text=X;anchor=center;font=C_heading;ratio=0.5;coords=0,0;fill='.$color : ''),
+ 	  (-object => $negate ?
+	     qq{shape=line;ratio=0.5;coords=-5,-5,5,5;fill=$color;width=3}.
+	     qq{|shape=line;ratio=0.5;coords=5,-5,-5,5;fill=$color;width=3}
+	       : ''),
 	  (-dash   => $negate ?
 	     (($text=~/^(\S+){/) ? $dash{'!'.$1}||$dash{'!{'} : $dash{'!'.$text}||$dash{'!'})
 	     : (($text=~/^(\S+){/) ? $dash{$1}||$dash{'{'} : $dash{$text}||'')),
