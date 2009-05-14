@@ -16,11 +16,31 @@ use FindBin;
 use lib $FindBin::RealBin;
 use Tree_Query::Grammar;
 
-if ($ARGV[0] eq '-T') {
+use Getopt::Long;
+use Pod::Usage;
+Getopt::Long::Configure ("bundling");
+my %opts;
+GetOptions(\%opts,
+   'trace|T',
+   'user-defined-relations|U=s',
+   'pmlrf-relations|R=s',
+);
+
+
+if ($opts{trace}) {
   $::RD_TRACE=1;
   shift;
 }
-
+sub _mk_regexp {
+  my $names = shift;
+  return '\b(?:'.join('|',map quotemeta, sort { $b cmp $a } @$names).')\b';
+}
+if ($opts{'pmlrf-relations'}) {
+  $Tree_Query::pmlrf_relations = _mk_regexp([split /,/,$opts{'pmlrf-relations'}]);
+}
+if ($opts{'user-defined-relations'}) {
+  $Tree_Query::user_defined = _mk_regexp([split /,/,$opts{'user_defined_relations'}]);
+}
 
 #$Tree_Query::user_defined = 'echild|eparent|a/lex.rf\|a/aux.rf|a/lex.rf|a/aux.rf|coref_text|coref_gram|compl';
 

@@ -1,9 +1,13 @@
 # -*- cperl -*-
 ################
-### SQL compiler and evaluator
+### SQL compiler and evaluator 
+#
+#
+# WARNING:  THIS CODE IS UNMAINTAINED !
+#
+#
 ################
 
-#### TrEd interface to Tree_Query::Evaluator
 {
 
 package Tree_Query::SQLSearch;

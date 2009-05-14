@@ -79,6 +79,7 @@
   <derive name="q-user-relation.type" type="q-base-relation.type">
     <container>
       <attribute required="1" name="label" type="q-user-relation-choice.type"/>
+      <attribute required="0" name="category" type="q-user-relation-category.type"/>
       <attribute name="min_length">
 	<cdata format="positiveInteger"/>
       </attribute>
@@ -122,10 +123,24 @@
       </attribute>
     </container>
   </derive>
+  <derive name="q-same-document-as.type" type="q-base-relation.type">
+    <container>
+      <attribute name="label">
+	<constant>same-document-as</constant>
+      </attribute>
+    </container>
+  </derive>
 
+  <type name="q-user-relation-category.type">
+    <choice>
+      <value>pmlrf</value>
+      <value>implementation</value>
+    </choice>
+  </type>
 
   <type name="q-relation.type">
-    <sequence content_pattern="(member|child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-tree-as)?">
+    <sequence content_pattern="(member|child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-document-as|same-tree-as)?">
+      <element name="same-document-as" type="q-same-document-as.type"/>
       <element name="same-tree-as" type="q-same-tree-as.type"/>
       <element name="depth-first-precedes" type="q-depth-first-precedes.type"/>
       <element name="depth-first-follows" type="q-depth-first-follows.type"/>
@@ -141,7 +156,8 @@
   </type>
 
   <type name="q-ref-relation.type">
-    <sequence content_pattern="(descendant|ancestor|parent|child|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-tree-as)?">
+    <sequence content_pattern="(descendant|ancestor|parent|child|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-document-as|same-tree-as)?">
+      <element name="same-document-as" type="q-same-document-as.type"/>
       <element name="same-tree-as" type="q-same-tree-as.type"/>
       <element name="depth-first-precedes" type="q-depth-first-precedes.type"/>
       <element name="depth-first-follows" type="q-depth-first-follows.type"/>
@@ -196,7 +212,7 @@
 	<cdata format="NMTOKEN"/>
       </member>
       <member name="description"><cdata format="any"/></member>
-      <member name="node-type"><cdata format="NMTOKEN"/></member>
+      <member name="node-type"><cdata format="token"/></member>
       <member name="optional" type="bool"/>
       <member name="relation" type="q-relation.type"/>
 <!--      <member name="edge-transitive" type="bool"/> -->

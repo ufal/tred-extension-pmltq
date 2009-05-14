@@ -341,6 +341,64 @@ sub get_decl_for {
   return $self->{type_decls}{$type} ||= Tree_Query::Common::QueryTypeToDecl($type,$self->get_schema($self->get_schema_name_for($type)));
 }
 
+sub get_user_defined_relations {
+  my ($self,$type)=@_;
+  if ($type) {
+    return $self->{type_user_defined_relations}{$type} if $self->{type_user_defined_relations} and $self->{type_user_defined_relations}{$type};
+    my $res = $self->request('relations',
+			     [format=>'text',
+			      category=>'implementation',
+			      type=>$type,
+			     ]);
+    unless ($res->is_success) {
+      ErrorMessage($res->status_line, "\n");
+      return [];
+    }
+    return $self->{type_user_defined_relations}{$type}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
+  } else {
+    return $self->{user_defined_relations} if $self->{user_defined_relations};
+    my $res = $self->request('relations',
+			     [format=>'text',
+			      category=>'implementation',
+			      (defined($type) ? (type=>$type) : ())
+			     ]);
+    unless ($res->is_success) {
+      ErrorMessage($res->status_line, "\n");
+      return [];
+    }
+    return $self->{user_defined_relations}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
+  }
+}
+
+sub get_pmlrf_relations {
+  my ($self,$type)=@_;
+  if ($type) {
+    return $self->{type_pmlrf_relations}{$type} if $self->{type_pmlrf_relations} and $self->{type_pmlrf_relations}{$type};
+    my $res = $self->request('relations',
+			     [format=>'text',
+			      category=>'pmlrf',
+			      type=>$type,
+			     ]);
+    unless ($res->is_success) {
+      ErrorMessage($res->status_line, "\n");
+      return [];
+    }
+    return $self->{type_pmlrf_relations}{$type}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
+  } else {
+    return $self->{pmlrf_relations} if $self->{pmlrf_relations};
+    my $res = $self->request('relations',
+			     [format=>'text',
+			      category=>'pmlrf',
+			      (defined($type) ? (type=>$type) : ())
+			     ]);
+    unless ($res->is_success) {
+      ErrorMessage($res->status_line, "\n");
+      return [];
+    }
+    return $self->{pmlrf_relations}=[ split /\r?\n/, Encode::decode_utf8($res->content,1) ];
+  }
+}
+
 sub get_specific_relations {
   my ($self,$type)=@_;
   if ($type) {
@@ -369,12 +427,21 @@ sub get_specific_relations {
 }
 
 sub get_relation_target_type {
-  my ($self,$node_type,$relation)=@_;
-  my $rels = $self->{specific_relation_map};
+  my ($self,$node_type,$relation,$category)=@_;
+  my $map_name;
+  if ($category eq 'implementation') {
+    $map_name = 'user_defined_relation_map';
+  } elsif ($category eq 'pmlrf') {
+    $map_name = 'pmlrf_relation_map';
+  } else {
+    $map_name = 'specific_relation_map';
+  }
+  my $rels = $self->{$map_name};
   unless ($rels and $rels->{$node_type}) {
     my $res = $self->request('relation_target_types',
 			     [
 			       format=>'text',
+			       category=>($category||''),
 			       type => $node_type,
 			     ]);
     unless ($res->is_success) {
@@ -382,7 +449,7 @@ sub get_relation_target_type {
       return;
     }
     my $R = {};
-    $self->{specific_relation_map}{$node_type} = $R;
+    $self->{$map_name}{$node_type} = $R;
     for my $line (split /\r?\n/, Encode::decode_utf8($res->content,1)) {
       my ($type,$rel,$target)=split /:/,$line,3;
       $R->{$rel}=$target if $type eq $node_type;

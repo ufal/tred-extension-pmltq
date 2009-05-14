@@ -53,7 +53,7 @@ sub show_result {
 	unless ($seen->{$idx}) {
 	  # this node is not shown in any window
 	    my $m = $self->{current_result}[$idx];
-	    if ($m and $m=~/^(([^#]+)(?:\#\#\d+))/g) {
+	    if ($m and $m=~/^(([^#]+)(?:\#\#\d+|\#[^0-9#][^#]*))/g) {
 	      my $win = $seen->{$1}||$seen->{$2};
 	      if ($win) {
 		SetMinorModeData('Tree_Query_Results','index',$idx,$win);
@@ -126,7 +126,7 @@ sub _find_shown_result_indexes {
     if (defined($idx) and $idx<@$cur_res) {
       my $m = $cur_res->[$idx];
       $seen{$idx}=$win;
-      if ($m=~/^(([^#]+)(?:\#\#\d+))/) {
+      if ($m=~/^(([^#]+)(?:\#\#\d+|\#[^0-9#][^#]*))/) {
 	$seen{$1}=$win;
 	$seen{$2}=$win;
       }
@@ -145,7 +145,7 @@ sub _assign_first_result_index_not_shown {
   for my $i (0..$#{$cur_res}) {
     next if $seen->{$i};
     my $m = $cur_res->[$i];
-    if (defined $m and $m=~/^(([^#]+)(?:\#\#\d+))/g) {
+    if (defined $m and $m=~/^(([^#]+)(?:\#\#\d+|\#[^0-9#][^#]*))/g) {
       if (!$seen->{$2}) {
 	$seen->{$i}=$win;
 	$seen->{$2}=$win;
@@ -158,7 +158,7 @@ sub _assign_first_result_index_not_shown {
   for my $i (0..$#{$cur_res}) {
     next if $seen->{$i};
     my $m = $cur_res->[$i];
-    if (defined $m and $m=~/^(([^#]+)(?:\#\#\d+))/g) {
+    if (defined $m and $m=~/^(([^#]+)(?:\#\#\d+|\#[^0-9#][^#]*))/g) {
       return $i if !$seen->{$2};
       if (!$seen->{$1}) {
 	$seen->{$i}=$win;

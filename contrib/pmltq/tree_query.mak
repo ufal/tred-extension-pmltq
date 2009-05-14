@@ -420,7 +420,7 @@ DeclareMinorMode 'Tree_Query_Results' => {
     },
     get_value_line_hook => sub {
       my ($fsfile,$no)=@_;
-      map_results($fsfile->tree($no),$fsfile->filename,$no);
+      map_results($fsfile->tree($no),$fsfile->filename,$no,$fsfile);
       if (!defined $_[-1]) {
 	# value line not supplied by hook, we provide the standard one
 	$_[-1] = $grp->treeView->value_line($fsfile,$no,1,1,$grp);
@@ -716,13 +716,15 @@ label:#{darkgreen}<?
   length $occ ? '#{-coords:n-10,n}#{-anchor:e}${occurrences='.$occ.'x}' : ""
 ?><? $${optional} ? '#{-coords:n-10,n}#{-anchor:e}${optional=?}'  : q()
 ?>
-xxxnode: #{brown}<? my$d=$${description}; $d=~s{^User .*?:}{}; $d ?>
+
+node: #{brown(}${description}
+
 node:<?
   ($this->{'#name'} =~ /^(?:and|or|not)$/) ? uc($this->{'#name'}) : '' 
 ?>${a}${target}
 node:<?
   if (($this->{'#name'}=~/^(?:node|subquery)$/) and !$this->{'.unhide'} and !TredMacro::HiddenVisible() ) {
-    join("\n",map { Tree_Query::as_text($_,{indent=>'  ',wrap =>1}) } 
+    join("\n",map { Tree_Query::as_text($_,{indent=>'  ',wrap =>1,no_description=>1}) } 
        grep {
 	my $f;
 	not(
@@ -732,7 +734,7 @@ node:<?
   } elsif ($this->{'#name'} eq 'test') {
     '${operator}'
   } elsif ($this->{'#name'} eq '' and !$this->parent) {
-     my $filters = Tree_Query::as_text($this,{no_childnodes=>1, indent=>'  ',wrap =>1});
+     my $filters = Tree_Query::as_text($this,{no_childnodes=>1, indent=>'  ',wrap =>1,no_description=>1});
      $filters=~s/([ \t]*>>)/Output filters:\n$1/; $filters
   }
 ?>
@@ -742,10 +744,11 @@ style: <?
   if ($this->parent->parent) {
     if ($name =~ /^(?:node|subquery|ref)$/) {
       my $rel=Tree_Query::Common::rel_as_text($this) || 'child';
+      my $dash = Tree_Query::arrow_dash($rel);
       $rel=~s/{.*//;
       my $color = Tree_Query::arrow_color($rel);
       my $arrow = Tree_Query::arrow($rel);
-      "#{Line-arrow:$arrow}".
+      "#{Line-arrow:$arrow}#{Line-dash:$dash}".
       (defined($color) ? "#{Line-fill:$color}" : '').
       ($name eq 'ref' and defined($color) ? "#{Oval-outline:$color}#{Oval-fill:$color}" : '').
       '#{Line-tag:relation}'
@@ -1214,6 +1217,7 @@ my %color = (
 #  'descendant' => 'blue',
 #  'ancestor' => 'lightblue',
   'same-tree-as' => '#eea',
+  'same-document-as' => '#eec',
   'depth-first-precedes' => 'red3',
   'depth-first-follows' => 'red4',
   'order-precedes' => 'orange',
@@ -1237,13 +1241,13 @@ my %color = (
 
 my %dash = (
   'normal' => '',
-  '!' => '8,6',
+  '!' => '', #'8,6',
   '{' => '12,2',
   'ancestor' => '12,2',
   'descendant' => '12,2',
-  '!{' => '12,3,4,3',
-  '!ancestor' => '12,3,4,3',
-  '!descendant' => '12,3,4,3',
+  '!{' => '12,2', #'12,3,4,3',
+  '!ancestor' => '12,2', #'12,3,4,3',
+  '!descendant' => '12,2', #'12,3,4,3',
 );
 my $free_arrow_color = 1; # color[0] taken by echild
 my %assigned_colors;
@@ -1261,7 +1265,11 @@ sub arrow {
 }
 sub arrow_dash {
   my ($rel,$node) = @_;
-  return $dash{$rel} || '';
+  if ($rel=~s/\{.*//) {
+    return $dash{'{'};
+  } else {
+    return $dash{$rel} || '';
+  }
 }
 
 sub get_nodelist_hook {
@@ -1309,7 +1317,7 @@ sub root_style_hook {
   my $hv = HiddenVisible();
   %main_query = map { $_=>1 } Tree_Query::Common::FilterQueryNodes($root);
   return if $no_legend;
-  icon('process-stop');
+  # icon('process-stop');
   for my $node (@nodes) {
     my @refs;
     my $qn = first { $_->{'#name'} =~ /^(?:node|subquery)$/ } ($node,$node->ancestors);
@@ -1381,14 +1389,31 @@ sub after_redraw_hook {
   for my $legend (@l) {
     my ($r,$negate,$name,$transitive) = @$legend;
     $transitive||='';
+    my $color = arrow_color($name);
+    my $width = $r eq 'member' ? $scale : $lw*$scale;
     $c->createLine($scale * 75, $y, $scale * 15, $y,
-		   -fill => arrow_color($name),
-		   -width => $r eq 'member' ? $scale : $lw*$scale,
+		   -fill => $color,
+		   
 		   (-dash => [split ',',($negate ? $dash{'!'.$name.$transitive}||$dash{'!'.$transitive} : $dash{$name.$transitive}||$dash{$transitive}||'')]),
 		   -arrow => $arrow{$name}||'first',
 		   -arrowshape => [14,20,4],
 		   -tags => ['scale_width','legend']
 		  );
+    if ($negate) {
+      for my $i (1..2) {
+	my $x = $scale * 5 + 20*$scale*$i;
+	for my $sign (-1,1) {
+	  $c->createLine( $x-3,
+			  $y-3*$sign,
+			  $x+3,
+			  $y+3*$sign,
+			  -fill=>$color,
+			  -width => $width,
+			  -tags => ['scale_width','legend']
+			 );
+	}
+      }
+    }
     $c->createText($scale * 85, $y, -font => ($tv->get_scaled_font || $tv->get_font),
 		   # -fill => arrow_color($name),
 		   -text=> $r, -anchor=>'w', -tags=>['legend','text_item'] );
@@ -1445,6 +1470,7 @@ sub node_style_hook {
       map { $_->{'#name'} eq 'not' ? $_->children : $_ }
       $node->children;
   }
+  my $width = $showHidden ? $lw-1 : $lw;
   for my $ref (@refs) {
     DrawArrows($node,$styles, [
       map {
@@ -1457,11 +1483,9 @@ sub node_style_hook {
 	scalar {
 	  -target => $name2node_hash{$target},
 	  -fill   => $color,
-#	  (-object => $negate ? 'shape=image;image=pmltq_process-stop;ratio=0.6;coords=0,0' : ''),
-# 	  (-object => $negate ? 'shape=text;text=X;anchor=center;font=C_heading;ratio=0.5;coords=0,0;fill='.$color : ''),
  	  (-object => $negate ?
-	     qq{shape=line;ratio=0.5;coords=-5,-5,5,5;fill=$color;width=3}.
-	     qq{|shape=line;ratio=0.5;coords=5,-5,-5,5;fill=$color;width=3}
+	     qq{shape=line;force=45%;start=30;step=30;stop=-30;repeat=1000;coords=-3,-3,3,3;tag=scale_width,line;fill=$color;width=$width;rotate=1}.
+	     qq{|shape=line;force=45%;start=30;step=30;stop=-30;repeat=1000;coords=3,-3,-3,3;tag=scale_width,line;fill=$color;width=$width;rotate=1}
 	       : ''),
 	  (-dash   => $negate ?
 	     (($text=~/^(\S+){/) ? $dash{'!'.$1}||$dash{'!{'} : $dash{'!'.$text}||$dash{'!'})
@@ -1474,7 +1498,7 @@ sub node_style_hook {
      ], {
        -arrow => 'last',
        -arrowshape => '14,20,4',
-       -width => $showHidden ? $lw-1 : $lw,
+       -width => $width,
        -smooth => 1,
      });
   }
@@ -1568,7 +1592,7 @@ sub _rel_name {
   $fmt ||= q{%s:%s};
   my $rel_name = $rel->name;
   if ($rel_name eq 'user-defined') {
-    return sprintf($fmt,$rel_name,$rel->value->{label});
+    return sprintf($fmt,$rel->value->{category}||$rel_name,$rel->value->{label});
   }
   return $rel_name;
 }
@@ -1774,9 +1798,10 @@ sub ReverseRelation {
   my ($rel)=SeqV($relation);
   my $reversed_name = Tree_Query::Common::reversed_relation(_rel_name($rel));
   if ($reversed_name) {
-    if ($reversed_name=~s/^(user-defined)://) {
-      $rel->set_name($1);
+    if ($reversed_name=~s/^(user-defined|implementation|pmlrf)://) {
+      $rel->set_name('user-defined');
       $rel->value->{label}=$reversed_name;
+      $rel->value->{category}=$1 unless $1 eq 'user-defined';
     } else {
       $rel->set_name($reversed_name);
     }
@@ -1877,10 +1902,11 @@ our @last_results;
 # determine which nodes are part of the current result
 sub map_results {
   return unless $SEARCH;
-  my ($root,$filename,$tree_number)=@_;
+  my ($root,$filename,$tree_number,$fsfile)=@_;
   $filename = FileName() unless defined $filename;
   $tree_number = CurrentTreeNumber() unless defined $tree_number;
-  my $map = $SEARCH->map_nodes_to_query_pos($filename,$tree_number,$root);
+  $fsfile = CurrentFile() unless defined $fsfile;
+  my $map = $SEARCH->map_nodes_to_query_pos($filename,$tree_number,$root,$fsfile);
   %is_match = defined($map) ? %$map : ();
 }
 
@@ -1971,13 +1997,14 @@ sub SelectSearch {
   my $file;
   if ($choice=~/^File/) {
     my @sel;
+    my $filelist_no='A';
+    my $file_no=0;
     ListQuery('Search through...',
 	      'browse',
 	      [
 		#  (map { $_->identify } @SEARCHES),
-		(map "File: ".$_, uniq(map $_->filename, grep ref, map(CurrentFile($_), TrEdWindows()), GetOpenFiles())),
-		(map "List: ".$_->name." (".$_->file_count." files)",
-		 grep $_->file_count, TrEdFileLists())
+		map((($file_no++).'. ')."File: ".$_, uniq(map $_->filename, grep ref, map(CurrentFile($_), TrEdWindows()), GetOpenFiles())),
+		map((($filelist_no++).'. ')."List: ".$_->name." (".$_->file_count." files)", grep $_->file_count, TrEdFileLists())
 	       ],
 	      \@sel,
 	      {
@@ -1995,9 +2022,9 @@ sub SelectSearch {
   } elsif ($choice =~ /^Treebank/) {
     $S=Tree_Query::HTTPSearch->new();
   } elsif ($choice =~ /^File/) {
-    if ($file=~s/^File: //) {
+    if ($file=~s/^\S+. File: //) {
       $S=Tree_Query::TrEdSearch->new({file => $file});
-    } elsif ($file=~s/^List: //) {
+    } elsif ($file=~s/^\S+. List: //) {
       $file =~ s/ \([^\)]* files\)$//g;
       $S=Tree_Query::TrEdSearch->new({filelist => $file});
     }
@@ -2164,22 +2191,28 @@ sub EditSubtree {
   EditQuery($this)
 }
 
-our ($match_node_re,$variable_re,$relation_re);
+our ($match_node_re,$variable_re,$relation_re,$rel_length_re);
 $match_node_re  = qr/\[((?:(?> [^][]+ )|(??{ $match_node_re }))*)\]/x;
 $variable_re = qr/\$[[:alpha:]_][[:alnum:]_]*/;
-$relation_re = qr/descendant|ancestor|child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|same-tree-as/;
+$relation_re = qr/descendant|ancestor|child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|same-tree-as|same-document-as/;
+$rel_length_re='(?:\{[0-9]*,[0-9]*\})';
+
 
 sub _find_type_in_query_string {
   my ($context,$rest)=@_;
   my ($type,$var);
-  my $user_defined = Tree_Query::Common::user_defined($SEARCH).'|';
+  my $user_defined = Tree_Query::Common::user_defined_relations_re($SEARCH);
+  $user_defined.='|' if length $user_defined;
+  my $pmlrf_re = Tree_Query::Common::pmlrf_relations_re($SEARCH);
   if ($context =~ /(${variable_re})\.$/) {
     $var = $1;
     if (($context.$rest) =~ m{^(.*)\bmember(?:\s+|\s*::\s*|$)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)\s+\Q$var\E\s*:=\s*\[}s) {
       $type = $2;
       my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
       $type = $prec.'/'.$type
-    } elsif (($context.$rest)=~/(?:(${user_defined}${relation_re})(?:\s+|\s*->\s*|\s*::\s*|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+    } elsif (($context.$rest)=~/(?:(${user_defined}${relation_re})${rel_length_re}(?:\s+|\s*::\s*|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+      $type = $2;
+    } elsif (($context.$rest)=~/(?:(${pmlrf_re})${rel_length_re}?(?:\s+|\s*->\s*|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
       $type = $2;
     }
   } else {
@@ -2201,7 +2234,9 @@ sub _find_type_in_query_string {
       $type = $2;
       my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
       $type = $prec.'/'.$type
-    } elsif ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|\s*->\s*|\s*::\s*|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+    } elsif ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|\s*::\s*|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+      $type = $2;
+    } elsif ($context =~ /(?:(${pmlrf_re})(?:\s+|\s*->\s*|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
       $type = $2;
     }
   }
@@ -2392,11 +2427,14 @@ sub EditQuery {
 								     $ed->get('insert','end'));
 			$node_type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
 			my $relation = 'child';
-			my $user_defined = Tree_Query::Common::user_defined($SEARCH);
-			if ($prev=~/(${relation_re}|member)\s*(?:::)?$/) {
+			my $user_defined = Tree_Query::Common::user_defined_relations_re($SEARCH);
+			my $pmlrf_re = Tree_Query::Common::pmlrf_relations_re($SEARCH);
+			if ($prev=~/(${relation_re}|member)${rel_length_re}?\s*(?:::)?$/) {
 			  $relation = $1;
-			} elsif ($user_defined and $prev=~/(${user_defined})\s*(?:->)?$/) {
-			  $relation = $1.' (user-defined)';
+			} elsif ($user_defined and $prev=~/(${user_defined})${rel_length_re}?\s*(?:::)?$/) {
+			  $relation = $1.' (implementation)';
+			} elsif ($pmlrf_re and $prev=~/(${pmlrf_re})${rel_length_re}?\s*(?:->)?$/) {
+			  $relation = $1.' (pmlrf)';
 			}
 			my @types;
 			if ($relation eq 'member') {
@@ -2620,13 +2658,18 @@ sub EditQuery {
 	       $d->BindButtons($d);
 	     },
 	   };
+  my $description;
   while ( defined ($string = EditBoxQuery('Edit query node', $string, '',$qopts)) ) {
     my $t0 = new Benchmark;
     eval {
       my $opts = {
-	specific_relations => ($SEARCH && $SEARCH->get_specific_relations()),
+	user_defined_relations => ($SEARCH && $SEARCH->get_user_defined_relations()),
+	pmlrf_relations => ($SEARCH && $SEARCH->get_pmlrf_relations()),
       };
       if (!$node->parent) {
+	$description='';
+	$description.=$1."\n" while ($string=~s{^\s*(?:#[ \t]*([^\n]*)\n)}{});
+	chomp $description;
 	$result=parse_query($string,$opts);
       } elsif ($node->{'#name'} eq 'node') {
 	$result=parse_node($string,$opts);
@@ -2670,6 +2713,7 @@ sub EditQuery {
       PasteNode($_,$result) for @c;
     } else {
       $node->{'output-filters'}=CloneValue($result->{'output-filters'});
+      $node->{'description'}=$description if defined($description);
       DeleteSubtree($_) for $node->children;
       CutPaste($_,$node) for reverse $result->children;
       DetermineNodeType($_) for ($node->descendants);

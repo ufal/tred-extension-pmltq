@@ -39,7 +39,8 @@ sub init_search {
     # FIXME: specific_relations
     my $type_mapper = $opts->{type_mapper};
     $query_tree=Tree_Query::parse_query($query,{
-      specific_relations =>  $type_mapper && $type_mapper->get_specific_relations(),
+      user_defined_relations => ($type_mapper && $type_mapper->get_user_defined_relations()),
+      pmlrf_relations => ($type_mapper && $type_mapper->get_pmlrf_relations()),
     });
     DetermineNodeType($_) for $query_tree->descendants;
   } else {
@@ -229,7 +230,7 @@ sub _find_pmlrf_relations {
   for my $schema (@schemas) {
     for my $type ($schema->node_types) {
       my $type_name = Tree_Query::Common::DeclToQueryType($type);
-      for my $path ($type->get_paths_to_atoms({ no_childnodes => 1 })) {
+      for my $path ($type->get_paths_to_atoms({ no_nodes=>1, no_childnodes => 1 })) {
 	my $decl = $type->find($path);
 	$decl=$decl->get_content_decl unless $decl->is_atomic;
 	if ($decl->get_decl_type == PML_CDATA_DECL and
@@ -251,9 +252,13 @@ sub _find_pmlrf_relations_for_type {
   my $relations_hash = $self->get_pmlrf_relations_hash; # init
   my $decl = $self->get_decl_for($type_name);
   return [] unless $decl;
-  for my $path ($decl->get_paths_to_atoms({ no_childnodes => 1 })) {
+  for my $path ($decl->get_paths_to_atoms({ no_nodes=>1, no_childnodes => 1 })) {
     my $mdecl = $decl->find($path);
-    $mdecl=$mdecl->get_content_decl unless $mdecl->is_atomic;
+    next if $mdecl->get_role eq '#KNIT';
+    unless ($mdecl->is_atomic) {
+      $mdecl=$mdecl->get_content_decl ;
+      next if $mdecl->get_role eq '#KNIT';
+    }
     if ($mdecl->get_decl_type == PML_CDATA_DECL and
 	$mdecl->get_format eq 'PMLREF') {
       push @relations, $path;
@@ -269,7 +274,7 @@ sub get_pmlrf_relations {
     my $type = ref($qnode_or_type) ? Tree_Query::Common::GetQueryNodeType($qnode_or_type,$self) : $qnode_or_type;
     my $rels = ref($self->{pmlrf_relations_hash}) && $self->{pmlrf_relations_hash}{$type};
     if ($rels) {
-      return [ sort keys %$rels ];
+      return [ uniq( sort keys %$rels ) ];
     } else {
       return $self->_find_pmlrf_relations_for_type($type);
     }
@@ -293,11 +298,11 @@ sub get_pmlrf_relations_hash {
   return $hash;
 }
 
-
 sub get_specific_relations {
   my ($self,$qnode_or_type)=@_;
-  return [qw(echild eparent a/lex.rf|a/aux.rf), 
-	  @{$self->get_pmlrf_relations($qnode_or_type)}];
+  return [uniq(sort(
+	  @{$self->get_user_defined_relations($qnode_or_type)},
+	  @{$self->get_pmlrf_relations($qnode_or_type)}))];
 }
 
 my %user_defined_relations = (
@@ -313,6 +318,18 @@ my %user_defined_relations = (
     'eparent' => 'a-node',
   },
 );
+
+sub get_user_defined_relations {
+  my ($self,$qnode_or_type)=@_;
+  if ($qnode_or_type) {
+    my $type = ref($qnode_or_type) ? Tree_Query::Common::GetQueryNodeType($qnode_or_type,$self) : $qnode_or_type;
+    my $rels = $user_defined_relations{$type};
+    if ($rels) {
+      return [ sort keys %$rels ];
+    }
+  }
+  return [];
+}
 
 my %known_pmlref_relations = (
   't-root' => {
@@ -333,12 +350,20 @@ my %known_pmlref_relations = (
 );
 
 sub get_relation_target_type {
-  my ($self,$node_type,$relation)=@_;
-  my $pmlref_relations_hash = $self->get_pmlrf_relations_hash($node_type);
-  return $known_pmlref_relations{$node_type} && $known_pmlref_relations{$node_type}{$relation}
-       || $user_defined_relations{$node_type} && $user_defined_relations{$node_type}{$relation}
-       || $pmlref_relations_hash && $pmlref_relations_hash->{$relation}
-	 ;
+  my ($self,$node_type,$relation,$category)=@_;
+  my $type;
+  if (!$category or $category eq 'pmlrf') {
+    $type = $known_pmlref_relations{$node_type} && $known_pmlref_relations{$node_type}{$relation};
+    return $type if $type;
+    my $pmlref_relations_hash = $self->get_pmlrf_relations_hash($node_type);
+    $type = $pmlref_relations_hash && $pmlref_relations_hash->{$relation};
+    return $type if $type;
+  }
+  if (!$category or $category eq 'implementation') {
+    $type = $user_defined_relations{$node_type} && $user_defined_relations{$node_type}{$relation};
+    return $type if $type;
+  }
+  return;
 }
 
 1;
@@ -406,7 +431,7 @@ sub search_first {
   $opts||={};
   local $SIG{__DIE__} = sub {
     confess(@_)
-  } if $DEBUG>3;
+  } if defined($DEBUG) and $DEBUG>3;
   my $query = $opts->{query} || $root;
   $self->{query}=$query;
   my $evaluator = $self->{evaluator} = Tree_Query::BtredEvaluator->new($query,
@@ -526,7 +551,7 @@ sub prepare_results {
 	SetCurrentFileList($self->{filelist},$search_win);
 	GotoFileNo($self->{current_result} ? $self->{currentFilelistPos} : 0);
 	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 1);
-	print STDERR "Current filename: ", ThisAddress(),"\n" if $DEBUG > 1;
+	print STDERR "Current filename: ", ThisAddress(),"\n" if defined($DEBUG) && $DEBUG > 1;
       } else {
 	Open($self->{file},{-keep_related=>1});
 	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 1);
@@ -607,14 +632,24 @@ sub update_label {
 }
 
 sub map_nodes_to_query_pos {
-  my ($self,$filename,$tree_number,$tree)=@_;
+  my ($self,$filename,$tree_number,$tree,$fsfile)=@_;
   return unless $self->{current_result};
   my $fn = $filename.'##'.($tree_number+1);
   my @nodes = ($tree,$tree->descendants);
   my $r = $self->{current_result};
   return {
-    map { (defined($_->[1]) and $_->[1]=~/^\Q$fn\E\.([0-9]+)$/) ? ($nodes[$1] => $_->[0]) : () }
-      reverse # upper nodes first (optional nodes do not overwrite their parents)
+    map {
+      my @ret;
+      if (defined($_->[1])) {
+	if ($_->[1]=~/^\Q$fn\E\.([0-9]+)$/) {
+	  @ret=($nodes[$1] => $_->[0])
+	} elsif ($fsfile and $_->[1]=~/^\Q$filename\E#([^#0-9][^#]*)$/) {
+	  my $n = PML::GetNodeByID($1,$fsfile);
+	  @ret = ($n => $_->[0]) if $n;
+	}
+      }
+      @ret
+    } reverse # upper nodes first (optional nodes do not overwrite their parents)
       map { [$_,$r->[$_]] } 0..$#$r
   };
 }
@@ -631,15 +666,22 @@ sub select_matching_node {
   my $idx = $self->node_index_in_last_query($query_node);
   return if !defined($idx);
   my $result = $self->{current_result}->[$idx];
+  return unless defined($result);
   foreach my $win (TrEdWindows()) {
     my $fsfile = $win->{FSFile};
     next unless $fsfile;
-    my $fn = $fsfile->filename.'##'.($win->{treeNo}+1);
-    next unless (defined($result) and $result =~ /\Q$fn\E\.([0-9]+)$/);
-    my $pos = $1;
-    my $r=$fsfile->tree($win->{treeNo});
-    for (1..$pos) {
-      $r=$r && $r->following();
+    my $filename = $fsfile->filename;
+    my $r;
+    my $fn = $filename.'##'.($win->{treeNo}+1);
+    if ($result =~ /\Q$fn\E\.([0-9]+)$/) {
+      my $pos = $1;
+      $r=$fsfile->tree($win->{treeNo});
+      for (1..$pos) {
+	$r=$r && $r->following();
+      }
+    } elsif ($result =~ /\Q$filename\E\#([^#0-9][^#]*)$/) {
+      $r = PML::GetNodeByID($1,$fsfile);
+      undef $r unless ($win->{Nodes} and first { $_ == $r } @{$win->{Nodes}});
     }
     if ($r) {
       EnableMinorMode('Tree_Query_Results',$win);
@@ -692,6 +734,7 @@ sub select_matching_node {
     'depth-first-precedes' => q( $start->root==$end->root and  do{my $n=$start->following; $n=$n->following while ($n and $n!=$end); $n ? 1 : 0 }), # not very effective !!
     'depth-first-follows' => q( $start->root==$end->root and  do{my $n=$end->following; $n=$n->following while ($n and $n!=$start); $n ? 1 : 0 }), # not very effective !!
     'same-tree-as' => q($start->root==$end->root), # not very effective !!
+    'same-document-as' => q(1), # FIXME: not correct !!
    );
 
   my %test_user_defined_relation = (
@@ -704,11 +747,11 @@ sub select_matching_node {
                         ($type eq 't-node.type' ? PML_T::GetEParents($start) :
                          $type eq 'a-node.type' ? PML_A::GetEParents($start,\\&PML_A::DiveAuxCP) : ()) }),
     'a/lex.rf|a/aux.rf' => q(grep $_ eq $end->{id}, GetANodeIDs()),
-    'a/lex.rf' => q(do { my $id=$start->attr('a/lex.rf'); $id=~s/^.*?#//; $id  eq $end->{id} } ),
-    'a/aux.rf' => q(grep { my $id=$_; $id=~s/^.*?#//; $id eq $end->{id} } TredMacro::ListV($start->attr('a/aux.rf'))),
-    'coref_text.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_text.rf'})),
-    'coref_gram.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_gram.rf'})),
-    'compl.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'compl.rf'})),
+#    'a/lex.rf' => q(do { my $id=$start->attr('a/lex.rf'); $id=~s/^.*?#//; $id  eq $end->{id} } ),
+#    'a/aux.rf' => q(grep { my $id=$_; $id=~s/^.*?#//; $id eq $end->{id} } TredMacro::ListV($start->attr('a/aux.rf'))),
+#    'coref_text.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_text.rf'})),
+#    'coref_gram.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'coref_gram.rf'})),
+#    'compl.rf' => q(grep $_ eq $end->{id}, TredMacro::ListV($start->{'compl.rf'})),
    );
 
 
@@ -720,6 +763,7 @@ sub select_matching_node {
     # condition subroutines
     my @conditions;
     my @iterators;
+    my @aux_iterators; # iterators used by transitive 'ref' relations
     my @sub_queries;
     my $parent_query=$opts->{parent_query};
     my $matched_nodes = $parent_query ? $parent_query->{matched_nodes} : [];
@@ -738,6 +782,7 @@ sub select_matching_node {
 
       query_pos => 0,
       iterators => \@iterators,
+      aux_iterators => \@aux_iterators,
       filter => undef,
       conditions => \@conditions,
       have => \%have,
@@ -771,7 +816,8 @@ sub select_matching_node {
       $clone_before_plan = 1;
     } else {
       $query_tree = Tree_Query::parse_query($query_tree,{
-	specific_relations =>  $self->{type_mapper}->get_specific_relations(),
+	user_defined_relations => $self->{type_mapper}->get_user_defined_relations(),
+	pmlrf_relations => $self->{type_mapper}->get_pmlrf_relations(),
       });
       TredMacro::DetermineNodeType($_) for $query_tree->descendants;
     }
@@ -949,7 +995,7 @@ sub select_matching_node {
 	$output_opts,
       );
       if ($init_code and @$filters) {
-	print STDERR "INIT CODE:\n",$init_code,"\n" if $DEBUG>2;
+	print STDERR "INIT CODE:\n",$init_code,"\n" if defined($DEBUG) and $DEBUG>2;
 	my $first_filter = $filters->[0];
 	$self->{filter} = eval $init_code; die $@ if $@;
 	$self->{filters} = $filters;
@@ -1035,20 +1081,30 @@ sub select_matching_node {
     my ($rel) = TredMacro::SeqV($qn->{relation});
     my $relation = $rel && $rel->name;
     $relation||='child';
-
+    my ($start_node,$target,$target_type);
+    if ($qn->{'#name'} eq 'ref') {
+      	$start_node = $qn;
+	$target = $qn->{target};
+	$target_type = $self->{name2type}{$target};
+    } else {
+      $target = $qn->{'id'};
+      $target_type = $qn->{'node-type'};
+      $start_node = $qn->parent;
+    }
+    $start_node=$start_node->parent while $start_node && $start_node->{'#name'} !~ /^(node|subquery)$/;
     my $iterator;
 
     if ($relation eq 'child') {
       $iterator = ChildnodeIterator->new($conditions);
     } elsif ($relation eq 'member') {
-      $iterator = MemberIterator->new($conditions,$qn->{'node-type'});
+      $iterator = MemberIterator->new($conditions,$target_type);
     } elsif ($relation eq 'descendant') {
       my ($min,$max)=
 	map { (defined($_) and length($_)) ? $_ : undef }
 	map { $rel->value->{$_} }
 	qw(min_length max_length);
       if (defined($min) or defined($max)) {
-	print STDERR "with bounded depth ($min,$max)\n" if $DEBUG>1;
+	print STDERR "with bounded depth ($min,$max)\n" if defined($DEBUG) and $DEBUG>1;
 	$iterator = DescendantIteratorWithBoundedDepth->new($conditions,$min,$max);
       } else {
 	$iterator = DescendantIterator->new($conditions);
@@ -1057,6 +1113,31 @@ sub select_matching_node {
       $iterator = ParentIterator->new($conditions);
     } elsif ($relation eq 'same-tree-as') {
       $iterator = SameTreeIterator->new($conditions);
+    } elsif ($relation eq 'same-document-as') {
+      $iterator = FSFileIterator->new($conditions);
+    } elsif ($relation eq 'order-precedes' or $relation eq 'order-follows') {
+      my ($attr1,$attr2) =
+	map {
+	  if (defined) {
+	    my $decl = $self->{type_mapper}->get_decl_for($_);
+	    if ($decl->get_decl_type == PML_ELEMENT_DECL) {
+	      $decl = $decl->get_content_decl;
+	    }
+	    my ($m)=$decl->find_members_by_role('#ORDER');
+	    defined($m) && $m->get_name
+	  } else { undef }
+	} ($start_node->{'node-type'},$target_type);
+      die "Could not determine ordering attribute for node '$start_node->{id}'\n"
+	unless defined $attr1 and length $attr1;
+      die "Could not determine ordering attribute for node '$target'\n"
+	unless defined $attr2 and length $attr1;
+      $iterator = OrderIterator->new($conditions,$attr1,$attr2,
+				     (($relation eq 'order-precedes') ? 1 : -1)
+				    );
+    } elsif ($relation eq 'depth-first-precedes') {
+      $iterator = DepthFirstPrecedesIterator->new($conditions);
+    } elsif ($relation eq 'depth-first-follows') {
+      $iterator = DepthFirstFollowsIterator->new($conditions);
     } elsif ($relation eq 'ancestor') {
       my ($min,$max)=
 	map { (defined($_) and length($_)) ? $_ : undef }
@@ -1069,33 +1150,44 @@ sub select_matching_node {
       }
     } elsif ($relation eq 'user-defined') {
       my $label = $rel->value->{label};
-      if ($label eq 'a/aux.rf') {
-	$iterator = AAuxRFIterator->new($conditions);
-      } elsif ($label eq 'a/lex.rf') {
-	$iterator = ALexRFIterator->new($conditions);
-	#$iterator = PMLREFIterator->new($conditions,'a/lex.rf');
-      } elsif ($label eq 'a/lex.rf|a/aux.rf') {
+      # if ($label eq 'a/aux.rf') {
+      #   $iterator = AAuxRFIterator->new($conditions);
+      # } elsif ($label eq 'a/lex.rf') {
+      #   $iterator = ALexRFIterator->new($conditions);
+      # } elsif ($label eq 'coref_text.rf') {
+      # 	$iterator = CorefTextRFIterator->new($conditions);
+      # } elsif ($label eq 'coref_gram.rf') {
+      # 	$iterator = CorefGramRFIterator->new($conditions);
+      # } elsif ($label eq 'compl.rf') {
+      # 	$iterator = ComplRFIterator->new($conditions);
+      if ($label eq 'a/lex.rf|a/aux.rf') {
 	$iterator = ALexOrAuxRFIterator->new($conditions);
-      } elsif ($label eq 'coref_text.rf') {
-	$iterator = CorefTextRFIterator->new($conditions);
-      } elsif ($label eq 'coref_gram.rf') {
-	$iterator = CorefGramRFIterator->new($conditions);
-      } elsif ($label eq 'compl.rf') {
-	$iterator = ComplRFIterator->new($conditions);
       } elsif ($label eq 'echild') {
 	$iterator = EChildIterator->new($conditions);
       } elsif ($label eq 'eparent') {
 	$iterator = EParentIterator->new($conditions);
       } elsif (first { $_ eq $label }
-		 @{$self->{type_mapper}->get_pmlrf_relations($qn->parent)}) {
+		 @{$self->{type_mapper}->get_pmlrf_relations($start_node)}) {
 	$iterator = PMLREFIterator->new($conditions,$label);
       } else {
 	die "user-defined relation '".$label."' unknown or not implemented in BTrEd Search\n"
       }
+      my ($min,$max)=($rel->value->{min_length},$rel->value->{max_length});
+      my $transitive = (defined($min) && ($min>1) or defined($max) && ($max>1)) ? 1 : 0;
+      if (defined($min) && defined($max) && ($min>$max)) {
+	die "Invalid bounds for transitive relation '$label\{$min,$max}'\n";
+      }
+      if ($transitive) {
+	if ($start_node->{'node-type'} ne $target_type) {
+	  die "Cannot create transitive closure for relation with different start-node and end-node types: '$start_node->{q(node-type)}' -> '$target_type'\n";
+	}
+	$iterator = TransitiveIterator->new($iterator,$min,$max);
+      }
     } else {
       die "relation ".$relation." not valid for this node or not yet implemented \n"
     }
-    print STDERR "iterator: ".ref($iterator)."\n" if $DEBUG>1;
+    print STDERR "iterator: ".ref($iterator)."\n" if defined($DEBUG) and $DEBUG>1;
+
     if ($qn->{optional}) {
       return OptionalIterator->new($iterator);
     } else {
@@ -1964,7 +2056,7 @@ sub select_matching_node {
 			)
 		      );
       }
-      print STDERR "$code\n" if $DEBUG>2;
+      print STDERR "$code\n" if defined($DEBUG) and $DEBUG>2;
       $opts->{filter_init} = $code;
     }
     push @compiled_filters, $output_filter;
@@ -2265,22 +2357,41 @@ sub select_matching_node {
       my $label='';
       if ($relation eq 'user-defined') {
 	$label = $rel->value->{label};
-	$expression = $test_user_defined_relation{$label};
-	if (!defined $expression) {
-	  if (first { $_ eq $label } @{$self->{type_mapper}->get_pmlrf_relations($node)}) {
-	    return $self->serialize_element(
-	      {
-		%$opts,
-		name => 'test',
-		condition => {
-		  '#name' => 'test',
-		  a => $label,
-		  b => 'id($'.$target.')',
-		  operator => '->',
-		},
-	      });
-	  } else {
-	    die "User-defined relation '$label' not supported as a test on this node!\n";
+	my ($min,$max)=($rel->value->{min_length},$rel->value->{max_length});
+	my $transitive = (defined($min) && ($min>1) or defined($max) && ($max>1)) ? 1 : 0;
+	if (defined($min) && defined($max) && ($min>$max)) {
+	  die "Invalid bounds for transitive relation '$label\{$min,$max}'\n";
+	}
+	my $target_type = $self->{name2type}{$target};
+	if ($transitive) {
+	  if ($opts->{'type'} ne $target_type) {
+	    die "Cannot create transitive closure for relation with different start-node and end-node types: '$opts->{type}' -> '$target_type'\n";
+	  }
+	  push @{$self->{aux_iterators}}, $self->create_iterator($node,sub{1});
+	  $expression =
+	    q(do{ my $it = $aux_iterators[).$#{$self->{aux_iterators}}.q(];
+                  my $aux = $it->start($start);
+                  $aux = $it->next while ($aux && $aux!=$end);
+                  $it->reset;
+                  $aux ? 1 : 0 });
+	} else {
+	  $expression = $test_user_defined_relation{$label};
+	  if (!defined $expression) {
+	    if (first { $_ eq $label } @{$self->{type_mapper}->get_pmlrf_relations($node)}) {
+	      return $self->serialize_element(
+		{
+		  %$opts,
+		  name => 'test',
+		  condition => {
+		    '#name' => 'test',
+		    a => $label,
+		    b => 'id($'.$target.')',
+		    operator => '->',
+		  },
+		});
+	    } else {
+	      die "User-defined relation '$label' not supported as a test on this node!\n";
+	    }
 	  }
 	}
       } else {
@@ -2849,7 +2960,7 @@ sub select_matching_node {
     my ($self,$seed,$test_max) = (shift,shift,shift);
     $self->reset();
     my $count=0;
-    print STDERR "<subquery>\n" if $DEBUG>1;
+    print STDERR "<subquery>\n" if defined($DEBUG) and $DEBUG>1;
     while ($self->find_next_match({boolean => 1, seed=>$seed})) {
       $count++;
       last unless $count<=$test_max;
@@ -2992,11 +3103,12 @@ sub select_matching_node {
     'ancestor' => 8,
     'parent' => 0.5,
     'child' => 10,
-    'order-precedes' => 10000,
-    'order-follows' => 10000,
-    'depth-first-precedes' => 1000,
-    'depth-first-follows' => 1000,
+    'order-precedes' => 1000,
+    'order-follows' => 1000,
+    'depth-first-precedes' => 100,
+    'depth-first-follows' => 100,
     'same-tree-as' => 40,
+    'same-document-as' => 10000,
    );
 
 
@@ -3247,6 +3359,10 @@ sub select_matching_node {
     croak "usage: $class->new(sub{...})" unless ref($conditions) eq 'CODE';
     return bless [$conditions],$class;
   }
+  sub clone {
+    my ($self)=@_;
+    return bless [$self->[CONDITIONS]], ref($self);
+  }
   sub conditions { return $_[0]->[CONDITIONS]; }
   sub start {}
   sub next {}
@@ -3268,8 +3384,12 @@ sub select_matching_node {
     croak "usage: $class->new(sub{...})" unless ref($conditions) eq 'CODE';
     return bless [$conditions,$fsfile],$class;
   }
+  sub clone {
+    my ($self)=@_;
+    return bless [$self->[CONDITIONS],$self->[FILE]], ref($self);
+  }
   sub start  {
-    my ($self,$fsfile)=@_;
+    my ($self,undef,$fsfile)=@_;
     $self->[TREE_NO]=0;
     if ($fsfile) {
       $self->[FILE]=$fsfile;
@@ -3400,6 +3520,10 @@ sub select_matching_node {
     croak "usage: $class->new(sub{...})" unless ref($conditions) eq 'CODE';
     return bless [$conditions,$root,$fsfile],$class;
   }
+  sub clone {
+    my ($self)=@_;
+    return bless [$self->[CONDITIONS],$self->[NODE],$self->[FILE]], ref($self);
+  }
   sub start  {
     my ($self)=@_;
     my $root = $self->[NODE] = $self->[TREE];
@@ -3448,6 +3572,109 @@ sub select_matching_node {
 }
 #################################################
 {
+  package TransitiveIterator;
+  use strict;
+  use base qw(Tree_Query::Iterator);
+  use constant CONDITIONS=>0;
+  use constant ITERATOR=>1;
+  use constant MIN=>2;
+  use constant MAX=>3;
+  use constant ITER_STACK=>4;
+  use constant SEEN=>5;
+  use constant FILE=>6;
+  use constant DEPTH=>7;
+  use Carp;
+  sub new {
+    my ($class,$iterator,$min,$max)=@_;
+    confess "usage: $class->new($iterator)" unless UNIVERSAL::isa($iterator,'Tree_Query::Iterator');
+    $min||=1;
+    return bless [undef,$iterator,$min,$max,0],$class;
+  }
+  sub clone {
+    my ($self)=@_;
+    return bless [undef,$self->[ITERATOR],$self->[MIN],$self->[MAX]], ref($self);
+  }
+  sub start  {
+    my ($self,$parent,$fsfile)=@_;
+    $self->[FILE]=$fsfile;
+    my $seen = $self->[SEEN]={};
+    my $iter = $self->[ITERATOR]->clone();
+    my $iterators = $self->[ITER_STACK]=[ $iter ];
+    my $n = $iter->start($parent,$fsfile);
+    $seen->{$n}=1;
+    $self->[DEPTH] = 1;
+    return $self->[MIN]<=1 ? $n : $self->next;
+  }
+  sub next {
+    my ($self)=@_;
+    my $depth = $self->[DEPTH];
+    return if $depth<1;
+    my $seen = $self->[SEEN];
+    my $iterators = $self->[ITER_STACK];
+    my $iter = $iterators->[-1];
+    my $min = $self->[MIN];
+    my $max = $self->[MAX];
+    my $n = $iter->node;
+    while ($n) {
+      if (!$max or $depth<$max) {
+	# prolong the iteratator (depth first)
+	my $new_it = $self->[ITERATOR]->clone();
+	my $new_n = $new_it->start($n,$self->[FILE]);
+	$new_n = $new_it->next while ($new_n and $seen->{$new_n});
+	if ($new_n) {
+	  push @$iterators, $new_it;
+	  $n = $new_n;
+	  $seen->{$n}=1;
+	  $iter = $new_it;
+	  $depth ++;
+	  next if $depth<$min;
+	  last;
+	}
+      }
+      # continue top-level iteratator (go breadth)
+      delete $seen->{$n};
+      $n = $iter->next;
+      $n = $n->next while ($n and $seen->{$n});
+      while (!$n and $depth>1) {
+	pop @$iterators; # drop current iterator
+	$depth --;
+	$iter = $iterators->[-1]; # current top-level iterator
+	delete $seen->{ $iter->node };
+	$n = $iter->next;
+	$n = $n->next while ($n and $seen->{$n});
+      }
+      $seen->{$n}=1 if $n;
+      last unless ($depth<$min and $depth>=1); # prolong if found but not long enough
+    }
+    $self->[DEPTH]=$depth;
+    return $n;
+  }
+  sub node {
+    my ($self)=@_;
+    if ($self->[DEPTH]>0) {
+      return $self->[ITER_STACK][-1]->node;
+    } else {
+      return undef;
+    }
+  }
+  sub file {
+    my ($self)=@_;
+    if ($self->[DEPTH]>0) {
+      return $self->[ITER_STACK][-1]->file;
+    } else {
+      return undef;
+    }
+  }
+  sub reset {
+    my ($self)=@_;
+    $self->[FILE]=undef;
+    $self->[ITER_STACK]=undef;
+    $self->[DEPTH]=undef;
+    $self->[SEEN]=undef;
+  }
+}
+#################################################
+{
   package OptionalIterator;
   use strict;
   use base qw(Tree_Query::Iterator);
@@ -3460,6 +3687,10 @@ sub select_matching_node {
     my ($class,$iterator)=@_;
     croak "usage: $class->new($iterator)" unless UNIVERSAL::isa($iterator,'Tree_Query::Iterator');
     return bless [$iterator->conditions,$iterator],$class;
+  }
+  sub clone {
+    my ($self)=@_;
+    return bless [$self->[CONDITIONS],$self->[ITERATOR]], ref($self);
   }
   sub start  {
     my ($self,$parent,$fsfile)=@_;
@@ -3514,6 +3745,86 @@ sub select_matching_node {
     my $n=$self->[NODE]->rbrother;
     my $fsfile = $self->[FILE];
     $n=$n->rbrother while ($n and !$conditions->($n,$fsfile));
+    return $self->[NODE]=$n;
+  }
+  sub node {
+    return $_[0]->[NODE];
+  }
+  sub file {
+    return $_[0]->[FILE];
+  }
+  sub reset {
+    my ($self)=@_;
+    $self->[NODE]=undef;
+    $self->[FILE]=undef;
+  }
+}
+#################################################
+{
+  package DepthFirstPrecedesIterator;
+  use strict;
+  use base qw(Tree_Query::Iterator);
+  use constant CONDITIONS=>0;
+  use constant NODE=>1;
+  use constant FILE=>2;
+
+  sub start  {
+    my ($self,$parent,$fsfile)=@_;
+    if ($fsfile) {
+      $self->[FILE]=$fsfile;
+    } else {
+      $fsfile=$self->[FILE];
+    }
+    my $n= $parent->following;
+    $self->[NODE]=$n;
+    return ($n && $self->[CONDITIONS]->($n,$fsfile)) ? $n : ($n && $self->next);
+  }
+  sub next {
+    my ($self)=@_;
+    my $conditions=$self->[CONDITIONS];
+    my $n=$self->[NODE]->following();
+    my $fsfile=$self->[FILE];
+    $n=$n->following() while ($n and !$conditions->($n,$fsfile));
+    return $self->[NODE]=$n;
+  }
+  sub node {
+    return $_[0]->[NODE];
+  }
+  sub file {
+    return $_[0]->[FILE];
+  }
+  sub reset {
+    my ($self)=@_;
+    $self->[NODE]=undef;
+    $self->[FILE]=undef;
+  }
+}
+#################################################
+{
+  package DepthFirstFollowsIterator;
+  use strict;
+  use base qw(Tree_Query::Iterator);
+  use constant CONDITIONS=>0;
+  use constant NODE=>1;
+  use constant FILE=>2;
+
+  sub start  {
+    my ($self,$parent,$fsfile)=@_;
+    if ($fsfile) {
+      $self->[FILE]=$fsfile;
+    } else {
+      $fsfile=$self->[FILE];
+    }
+    my $n= $parent->previous;
+    $self->[NODE]=$n;
+    return ($n && $self->[CONDITIONS]->($n,$fsfile)) ? $n : ($n && $self->next);
+  }
+  sub next {
+    my ($self)=@_;
+    my $conditions=$self->[CONDITIONS];
+    my $n=$self->[NODE]->previous();
+    my $fsfile=$self->[FILE];
+    $n=$n->previous() while ($n and !$conditions->($n,$fsfile));
     return $self->[NODE]=$n;
   }
   sub node {
@@ -3591,6 +3902,10 @@ sub select_matching_node {
     croak "usage: $class->new(sub{...})" unless ref($conditions) eq 'CODE';
     $min||=0;
     return bless [$conditions,$min,$max],$class;
+  }
+  sub clone {
+    my ($self)=@_;
+    return bless [$self->[CONDITIONS],$self->[MIN],$self->[MAX]], ref($self);
   }
   sub start  {
     my ($self,$parent,$fsfile)=@_;
@@ -3730,6 +4045,10 @@ sub select_matching_node {
     $min||=0;
     return bless [$conditions,$min,$max],$class;
   }
+  sub clone {
+    my ($self)=@_;
+    return bless [$self->[CONDITIONS],$self->[MIN],$self->[MAX]], ref($self);
+  }
   sub start  {
     my ($self,$node,$fsfile)=@_;
     my $min = $self->[MIN]||1;
@@ -3773,40 +4092,40 @@ sub select_matching_node {
   }
 }
 
-#################################################
-{
-  package ALexRFIterator;
-  use strict;
-  use base qw(Tree_Query::Iterator);
-  use constant CONDITIONS=>0;
-  use constant NODE=>1;
-  use constant FILE=>2;
-  sub start  {
-    my ($self,$node,$fsfile)=@_;
-    my $lex_rf = $node->attr('a/lex.rf');
-    my $refnode;
-    $self->[FILE] = $fsfile;
-    if (defined $lex_rf) {
-      # $lex_rf=~s/^.*?#//;
-      $refnode=PML_T::GetANodeByID($lex_rf,$fsfile);
-    }
-    return $self->[NODE] = $self->[CONDITIONS]->($refnode,$self->file) ? $refnode : undef;
-  }
-  sub next {
-    return $_[0]->[NODE]=undef;
-  }
-  sub node {
-    return $_[0]->[NODE];
-  }
-  sub file {
-    return PML_T::AFile($_[0]->[FILE]);
-  }
-  sub reset {
-    my ($self)=@_;
-    $self->[NODE]=undef;
-    $self->[FILE]=undef;
-  }
-}
+# #################################################
+# {
+#   package ALexRFIterator;
+#   use strict;
+#   use base qw(Tree_Query::Iterator);
+#   use constant CONDITIONS=>0;
+#   use constant NODE=>1;
+#   use constant FILE=>2;
+#   sub start  {
+#     my ($self,$node,$fsfile)=@_;
+#     my $lex_rf = $node->attr('a/lex.rf');
+#     my $refnode;
+#     $self->[FILE] = $fsfile;
+#     if (defined $lex_rf) {
+#       # $lex_rf=~s/^.*?#//;
+#       $refnode=PML_T::GetANodeByID($lex_rf,$fsfile);
+#     }
+#     return $self->[NODE] = $self->[CONDITIONS]->($refnode,$self->file) ? $refnode : undef;
+#   }
+#   sub next {
+#     return $_[0]->[NODE]=undef;
+#   }
+#   sub node {
+#     return $_[0]->[NODE];
+#   }
+#   sub file {
+#     return PML_T::AFile($_[0]->[FILE]);
+#   }
+#   sub reset {
+#     my ($self)=@_;
+#     $self->[NODE]=undef;
+#     $self->[FILE]=undef;
+#   }
+# }
 #################################################
 {
   package SimpleListIterator;
@@ -3854,20 +4173,20 @@ sub select_matching_node {
   }
 }
 
-#################################################
-{
-  package AAuxRFIterator;
-  use strict;
-  use base qw(SimpleListIterator);
-  sub get_node_list  {
-    my ($self,$node)=@_;
-    my $a_file = PML_T::AFile($self->[SimpleListIterator::FILE]);
-    return [map {
-      my $n = PML_T::GetANodeByID($_,$self->[SimpleListIterator::FILE]);
-      defined $n ? [$n,$a_file] : ()
-    } TredMacro::ListV($node->attr('a/aux.rf'))];
-  }
-}
+# #################################################
+# {
+#   package AAuxRFIterator;
+#   use strict;
+#   use base qw(SimpleListIterator);
+#   sub get_node_list  {
+#     my ($self,$node)=@_;
+#     my $a_file = PML_T::AFile($self->[SimpleListIterator::FILE]);
+#     return [map {
+#       my $n = PML_T::GetANodeByID($_,$self->[SimpleListIterator::FILE]);
+#       defined $n ? [$n,$a_file] : ()
+#     } TredMacro::ListV($node->attr('a/aux.rf'))];
+#   }
+# }
 #################################################
 {
   package PMLREFIterator;
@@ -3882,6 +4201,12 @@ sub select_matching_node {
     $self->[ATTR]=$attr;
     bless $self, $class; # reblessing
     return $self;
+  }
+  sub clone {
+    my ($self)=@_;
+    my $clone = $self->SimpleListIterator::clone();
+    $clone->[ATTR]=$self->[ATTR];
+    return $clone;
   }
   sub get_node_list  {
     my ($self,$node)=@_;
@@ -3914,10 +4239,58 @@ sub select_matching_node {
     bless $self, $class; # reblessing
     return $self;
   }
+  sub clone {
+    my ($self)=@_;
+    my $clone = $self->SimpleListIterator::clone();
+    $clone->[ATTR]=$self->[ATTR];
+    return $clone;
+  }
   sub get_node_list  {
     my ($self,$node)=@_;
     my $fsfile = $self->[SimpleListIterator::FILE];
     return [map [$_,$fsfile], PMLInstance::get_all($node,$self->[ATTR])];
+  }
+}
+#################################################
+{
+  package OrderIterator;
+  use strict;
+  use base qw(SimpleListIterator);
+  use constant SOURCE_ORD_ATTR => SimpleListIterator::FIRST_FREE;
+  use constant TARGET_ORD_ATTR => SimpleListIterator::FIRST_FREE+1;
+  use constant MULT => SimpleListIterator::FIRST_FREE+2;
+  use Carp;
+  sub new {
+    my ($class,$conditions,$s_ord_attr,$t_ord_attr,$mult)=@_;
+    croak "usage: $class->new(sub{...},\$source_ord_attr,\$target_ord_attr)" 
+      unless (ref($conditions) eq 'CODE' and defined($s_ord_attr) and defined($t_ord_attr));
+    my $self = SimpleListIterator->new($conditions);
+    $self->[SOURCE_ORD_ATTR]=$s_ord_attr;
+    $self->[TARGET_ORD_ATTR]=$t_ord_attr;
+    $self->[MULT]=$mult; # mult should be 1 or -1
+    bless $self, $class; # reblessing
+    return $self;
+  }
+  sub clone {
+    my ($self)=@_;
+    my $clone = $self->SimpleListIterator::clone();
+    $clone->[SOURCE_ORD_ATTR]=$self->[SOURCE_ORD_ATTR];
+    $clone->[TARGET_ORD_ATTR]=$self->[TARGET_ORD_ATTR];
+    $clone->[MULT]=$self->[MULT];
+    return $clone;
+  }
+  sub get_node_list  {
+    my ($self,$node)=@_;
+    my $fsfile = $self->[SimpleListIterator::FILE];
+    my $mult = $self->[MULT];
+    my $s_ord_attr = $self->[SOURCE_ORD_ATTR];
+    my $t_ord_attr = $self->[TARGET_ORD_ATTR];
+    return [map [$_,$fsfile],
+	    grep {
+	      $_!=$node and
+	      $mult*($node->attr($s_ord_attr)||0) < $mult*($_->attr($t_ord_attr)||0)
+	    }
+	    $node->root->descendants];
   }
 }
 #################################################
@@ -3932,48 +4305,48 @@ sub select_matching_node {
     return [ $a_file ? map [$_,$a_file ], PML_T::GetANodes($node,$fsfile) : () ];
   }
 }
-#################################################
-{
-  package CorefTextRFIterator;
-  use strict;
-  use base qw(SimpleListIterator);
-  sub get_node_list  {
-    my ($self,$node)=@_;
-    my $fsfile = $self->[SimpleListIterator::FILE];
-    return [map {
-      my $n = PML::GetNodeByID($_);
-      $n ? [ $n, $fsfile ] : ()
-    } TredMacro::ListV($node->attr('coref_text.rf'))];
-  }
-}
-#################################################
-{
-  package CorefGramRFIterator;
-  use strict;
-  use base qw(SimpleListIterator);
-  sub get_node_list  {
-    my ($self,$node)=@_;
-    my $fsfile = $self->[SimpleListIterator::FILE];
-    return [map {
-      my $n = PML::GetNodeByID($_);
-      $n ? [ $n, $fsfile ] : ()
-    } TredMacro::ListV($node->attr('coref_gram.rf'))];
-  }
-}
-#################################################
-{
-  package ComplRFIterator;
-  use strict;
-  use base qw(SimpleListIterator);
-  sub get_node_list  {
-    my ($self,$node)=@_;
-    my $fsfile = $self->[SimpleListIterator::FILE];
-    return [map {
-      my $n = PML::GetNodeByID($_);
-      $n ? [ $n, $fsfile ] : ()
-    } TredMacro::ListV($node->attr('compl.rf'))];
-  }
-}
+# #################################################
+# {
+#   package CorefTextRFIterator;
+#   use strict;
+#   use base qw(SimpleListIterator);
+#   sub get_node_list  {
+#     my ($self,$node)=@_;
+#     my $fsfile = $self->[SimpleListIterator::FILE];
+#     return [map {
+#       my $n = PML::GetNodeByID($_);
+#       $n ? [ $n, $fsfile ] : ()
+#     } TredMacro::ListV($node->attr('coref_text.rf'))];
+#   }
+# }
+# #################################################
+# {
+#   package CorefGramRFIterator;
+#   use strict;
+#   use base qw(SimpleListIterator);
+#   sub get_node_list  {
+#     my ($self,$node)=@_;
+#     my $fsfile = $self->[SimpleListIterator::FILE];
+#     return [map {
+#       my $n = PML::GetNodeByID($_);
+#       $n ? [ $n, $fsfile ] : ()
+#     } TredMacro::ListV($node->attr('coref_gram.rf'))];
+#   }
+# }
+# #################################################
+# {
+#   package ComplRFIterator;
+#   use strict;
+#   use base qw(SimpleListIterator);
+#   sub get_node_list  {
+#     my ($self,$node)=@_;
+#     my $fsfile = $self->[SimpleListIterator::FILE];
+#     return [map {
+#       my $n = PML::GetNodeByID($_);
+#       $n ? [ $n, $fsfile ] : ()
+#     } TredMacro::ListV($node->attr('compl.rf'))];
+#   }
+# }
 #################################################
 {
   package EParentIterator;
