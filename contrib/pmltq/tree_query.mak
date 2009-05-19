@@ -744,11 +744,12 @@ style: <?
   if ($this->parent->parent) {
     if ($name =~ /^(?:node|subquery|ref)$/) {
       my $rel=Tree_Query::Common::rel_as_text($this) || 'child';
+      my $hint = $rel;
       my $dash = Tree_Query::arrow_dash($rel);
       $rel=~s/{.*//;
       my $color = Tree_Query::arrow_color($rel);
       my $arrow = Tree_Query::arrow($rel);
-      "#{Line-arrow:$arrow}#{Line-dash:$dash}".
+      "#{Line-arrow:$arrow}#{Line-dash:$dash}#{Line-hint:$hint}".
       (defined($color) ? "#{Line-fill:$color}" : '').
       ($name eq 'ref' and defined($color) ? "#{Oval-outline:$color}#{Oval-fill:$color}" : '').
       '#{Line-tag:relation}'
@@ -1080,10 +1081,10 @@ sub AssignRelation {
 	     ) || return;
   }
   SetRelation($node,$sel[0]) if @sel;
-  if (@sel and $sel[0] eq 'descendant' or $sel[0] eq 'ancestor') {
-    local $main::sortAttrs=0;
-    EditAttribute($node,'relation/[1]'.$sel[0]) || return;
-  }
+  # if (@sel and $sel[0] eq 'descendant' or $sel[0] eq 'ancestor') {
+  #   local $main::sortAttrs=0;
+  #   EditAttribute($node,'relation/[1]'.$sel[0]) || return;
+  # }
   AssignType($node) || return;
 #  } elsif (EditAttribute($node,'relation')) {
 #    AssignType($node);
@@ -1242,12 +1243,12 @@ my %color = (
 my %dash = (
   'normal' => '',
   '!' => '', #'8,6',
-  '{' => '12,2',
-  'ancestor' => '12,2',
-  'descendant' => '12,2',
-  '!{' => '12,2', #'12,3,4,3',
-  '!ancestor' => '12,2', #'12,3,4,3',
-  '!descendant' => '12,2', #'12,3,4,3',
+  '{' => '12,4',
+  'ancestor' => '12,4',
+  'descendant' => '12,4',
+  '!{' => '12,4', #'12,3,4,3',
+  '!ancestor' => '12,4', #'12,3,4,3',
+  '!descendant' => '12,4', #'12,3,4,3',
 );
 my $free_arrow_color = 1; # color[0] taken by echild
 my %assigned_colors;
@@ -1479,17 +1480,18 @@ sub node_style_hook {
 	my $target = $ref->{target};
 	my $negate = ($node!=$ref && $ref->parent->{'#name'} eq 'not') ? 1 : 0;
 	my $text = Tree_Query::Common::rel_as_text($ref);
+	$text = '! '.$text if $negate;
 	my $color = $showHidden ? 'gray' : arrow_color($name);
 	scalar {
 	  -target => $name2node_hash{$target},
 	  -fill   => $color,
- 	  (-object => $negate ?
+ 	  (-decoration => $negate ?
 	     qq{shape=line;force=45%;start=30;step=30;stop=-30;repeat=1000;coords=-3,-3,3,3;tag=scale_width,line;fill=$color;width=$width;rotate=1}.
 	     qq{|shape=line;force=45%;start=30;step=30;stop=-30;repeat=1000;coords=3,-3,-3,3;tag=scale_width,line;fill=$color;width=$width;rotate=1}
 	       : ''),
 	  (-dash   => $negate ?
-	     (($text=~/^(\S+){/) ? $dash{'!'.$1}||$dash{'!{'} : $dash{'!'.$text}||$dash{'!'})
-	     : (($text=~/^(\S+){/) ? $dash{$1}||$dash{'{'} : $dash{$text}||'')),
+	     (($text=~/{/) ? $dash{'!'.$1}||$dash{'!{'} : $dash{'!'.$text}||$dash{'!'})
+	     : (($text=~/{/) ? $dash{$1}||$dash{'{'} : $dash{$text}||'')),
 	  -raise => 8+16*(++$i),
 	  -hint => $text,
 	  -tag => 'relation:'.$ref,
