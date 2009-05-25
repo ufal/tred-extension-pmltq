@@ -589,8 +589,7 @@ D0EA2B b7ce1c6b0d0c E2F9FF  c1881d075743  0247FE
 #remove-menu Trim (remove all but current subtree)
 
 # Setup context
-unshift @TredMacro::AUTO_CONTEXT_GUESSING,
-sub {
+unshift @TredMacro::AUTO_CONTEXT_GUESSING, sub {
   SchemaName() eq 'tree_query' ? __PACKAGE__ : undef ;
 };
 
@@ -2206,15 +2205,16 @@ sub _find_type_in_query_string {
   my $user_defined = Tree_Query::Common::user_defined_relations_re($SEARCH);
   $user_defined.='|' if length $user_defined;
   my $pmlrf_re = Tree_Query::Common::pmlrf_relations_re($SEARCH);
+
   if ($context =~ /(${variable_re})\.$/) {
     $var = $1;
-    if (($context.$rest) =~ m{^(.*)\bmember(?:\s+|\s*::\s*|$)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)\s+\Q$var\E\s*:=\s*\[}s) {
+    if (($context.$rest) =~ m{^(.*)\bmember(?:\s+|\s*::\s*)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)\s+\Q$var\E\s*:=\s*\[}s) {
       $type = $2;
       my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
       $type = $prec.'/'.$type
-    } elsif (($context.$rest)=~/(?:(${user_defined}${relation_re})${rel_length_re}(?:\s+|\s*::\s*|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+    } elsif (($context.$rest)=~/(?:(${user_defined}${relation_re})${rel_length_re}(?:\s+|\s*::\s*))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
       $type = $2;
-    } elsif (($context.$rest)=~/(?:(${pmlrf_re})${rel_length_re}?(?:\s+|\s*->\s*|$))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+    } elsif (($context.$rest)=~/(?:(${pmlrf_re})${rel_length_re}?(?:\s+|\s*->\s*))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
       $type = $2;
     }
   } else {
@@ -2230,15 +2230,15 @@ sub _find_type_in_query_string {
       $depth++ if $context=~s/^\]\s*//;
       return if $prev eq $context; # not a context for inserting anything
     }
-    return unless length $context;
+    return unless $context =~ /\S/;
     $context=reverse $context;
-    if ($context =~ m{^(.*)\bmember(?:\s+|$)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)(?:\s+|$)(?:(${variable_re})\s*:=)?$}) {
+    if ($context =~ m{^(.*)\bmember\s+(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)(?:\s+|$)(?:(${variable_re})\s*:=)?$}s) {
       $type = $2;
       my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
       $type = $prec.'/'.$type
-    } elsif ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|\s*::\s*|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+    } elsif ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|\s*::\s*))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
       $type = $2;
-    } elsif ($context =~ /(?:(${pmlrf_re})(?:\s+|\s*->\s*|$))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+    } elsif ($context =~ /(?:(${pmlrf_re})(?:\s+|\s*->\s*))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
       $type = $2;
     }
   }
@@ -2261,7 +2261,7 @@ sub _find_element_names_for_decl {
 }
 
 sub _editor_offer_values {
-  my ($ed,$operator) = @_;
+  my ($ed,$operator,$qn) = @_;
   my @sel;
   my $context= $ed->get('0.0','insert');
   my $eq;
@@ -2276,6 +2276,7 @@ sub _editor_offer_values {
       $eq=$5;
       my ($type) = _find_type_in_query_string($context,
 					      $ed->get('insert','end'));
+      $type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$type if $qn && $type=~m{^/};
       my $decl = $SEARCH->get_decl_for($type);
       my @values;
       if ($is_name) {
@@ -2558,8 +2559,8 @@ sub EditQuery {
 		     }
 		 ],
 		 ['!','!'],
-		 ['= (equals)',undef,{-command => [\&_editor_offer_values,$ed,'=']}],
-		 ['in { ... }',undef,{-command => [\&_editor_offer_values,$ed,'in']}],
+		 ['= (equals)',undef,{-command => [\&_editor_offer_values,$ed,'=',$node]}],
+		 ['in { ... }',undef,{-command => [\&_editor_offer_values,$ed,'in',$node]}],
 		 ['~ (regexp)' => '~'],
 		 qw|< >|,
 		 ['Function' => [#map { $_.'()' }
