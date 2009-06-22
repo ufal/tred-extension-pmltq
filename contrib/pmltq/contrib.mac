@@ -15,5 +15,6 @@
 #####include "tree_query_sql.mak"
 #include "tree_query_http.mak"
 #include "tree_query_btred.mak"
+#include "tree_query_tred.mak"
 
 #endif tree_query

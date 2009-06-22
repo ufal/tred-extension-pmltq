@@ -246,14 +246,24 @@ sub resolve_path {
 
 
 sub map_nodes_to_query_pos {
-  my ($self,$filename,$tree_number,$tree)=@_;
+  my ($self,$filename,$tree_number,$tree,$fsfile)=@_;
   return unless $self->{current_result};
   my $fn = $filename.'##'.($tree_number+1);
   my @nodes = ($tree,$tree->descendants);
   my $r = $self->{current_result};
   return {
-    map { (defined($_->[1]) and $_->[1]=~/^\Q$fn\E\.(\d+)$/) ? ($nodes[$1] => $_->[0]) : () } 
-      reverse # upper nodes first (optional nodes do not overwrite their parents)
+    map {
+      my @ret;
+      if (defined($_->[1])) {
+	if ($_->[1]=~/^\Q$fn\E\.([0-9]+)$/) {
+	  @ret=($nodes[$1] => $_->[0])
+	} elsif ($fsfile and $_->[1]=~/^\Q$filename\E#([^#0-9][^#]*)$/) {
+	  my $n = PML::GetNodeByID($1,$fsfile);
+	  @ret = ($n => $_->[0]) if $n;
+	}
+      }
+      @ret
+    } reverse # upper nodes first (optional nodes do not overwrite their parents)
       map { [$_,$self->resolve_path($r->[$_])] } 0..$#$r
   };
 }
@@ -274,12 +284,18 @@ sub select_matching_node {
   foreach my $win (TrEdWindows()) {
     my $fsfile = $win->{FSFile};
     next unless $fsfile;
-    my $fn = $fsfile->filename.'##'.($win->{treeNo}+1);
-    next unless $result and $result =~ /\Q$fn\E\.(\d+)$/;
-    my $pos = $1;
-    my $r=$fsfile->tree($win->{treeNo});
-    for (1..$pos) {
-      $r=$r->following();
+    my $filename = $fsfile->filename;
+    my $r;
+    my $fn = $filename.'##'.($win->{treeNo}+1);
+    if ($result =~ /\Q$fn\E\.([0-9]+)$/) {
+      my $pos = $1;
+      $r=$fsfile->tree($win->{treeNo});
+      for (1..$pos) {
+	$r=$r && $r->following();
+      }
+    } elsif ($result =~ /\Q$filename\E\#([^#0-9][^#]*)$/) {
+      $r = PML::GetNodeByID($1,$fsfile);
+      undef $r unless ($win->{Nodes} and first { $_ == $r } @{$win->{Nodes}});
     }
     if ($r) {
       EnableMinorMode('Tree_Query_Results',$win);
