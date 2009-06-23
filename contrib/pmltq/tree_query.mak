@@ -2,11 +2,6 @@
 
 #include <contrib/pml/PML.mak>
 
-package Tree_Query::TrEd; # so that it gets reloaded
-package Tree_Query::Common; # so that it gets reloaded
-package Tree_Query::NG2PMLTQ; # so that it gets reloaded
-package Tree_Query::SQLEvaluator; # so that it gets reloaded
-
 package Tree_Query;
 {
 use strict;
@@ -1080,10 +1075,10 @@ sub AssignRelation {
 	     ) || return;
   }
   SetRelation($node,$sel[0]) if @sel;
-  # if (@sel and $sel[0] eq 'descendant' or $sel[0] eq 'ancestor') {
-  #   local $main::sortAttrs=0;
-  #   EditAttribute($node,'relation/[1]'.$sel[0]) || return;
-  # }
+  #if (@sel and $sel[0] eq 'descendant' or $sel[0] eq 'ancestor') {
+  #  local $main::sortAttrs=0;
+  #  EditAttribute($node,'relation/[1]'.$sel[0]) || return;
+  #}
   AssignType($node) || return;
 #  } elsif (EditAttribute($node,'relation')) {
 #    AssignType($node);

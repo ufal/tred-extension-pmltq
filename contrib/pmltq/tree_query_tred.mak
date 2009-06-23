@@ -8,9 +8,12 @@ use Carp;
 use strict;
 use warnings;
 BEGIN { import TredMacro  }
+
 use Tree_Query::TrEd;
 use Tree_Query::TypeMapper;
+
 use base qw(Tree_Query::TrEd Tree_Query::TypeMapper);
+
 use vars qw($DEBUG);
 BEGIN {
   *DEBUG = \$Tree_Query::BtredEvaluator::DEBUG;
