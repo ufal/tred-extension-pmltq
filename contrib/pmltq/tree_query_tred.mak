@@ -9,8 +9,8 @@ use strict;
 use warnings;
 BEGIN { import TredMacro  }
 
-use Tree_Query::TrEd;
-use Tree_Query::TypeMapper;
+use Tree_Query::TrEd ();
+use Tree_Query::TypeMapper ();
 
 use base qw(Tree_Query::TrEd Tree_Query::TypeMapper);
 
@@ -30,6 +30,7 @@ sub new {
   my $ident = $self->identify;
   Tree_Query::CreateSearchToolbar($ident);
   (undef, $self->{label}) = Tree_Query::CreateSearchToolbar($ident);
+  $self->{particular_trees} = $opts->{particular_trees};
   $self->{on_destroy} = MacroCallback(sub {
 					DestroyUserToolbar($ident);
 					ChangingFile(0);
@@ -74,6 +75,7 @@ sub search_first {
 						      {
 							type_mapper => $self,
 							current_filelist => $self->{filelist} ? 1 : 0,
+							particular_trees => $self->{particular_trees} ? 1 : 0,
 							no_filters => $opts->{no_filters},
 							count => $opts->{count},
 						      });
@@ -184,7 +186,7 @@ sub prepare_results {
 
       local $search_win->{noRedraw}=1;
       if ($self->{filelist}) {
-	SetCurrentFileList($self->{filelist},$search_win);
+	SetCurrentFileListInWindow($self->{filelist},$search_win,{no_open=>1});
 	GotoFileNo($self->{current_result} ? $self->{currentFilelistPos} : 0);
 	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 1);
 	print STDERR "Current filename: ", ThisAddress(),"\n" if defined($DEBUG) && $DEBUG > 1;

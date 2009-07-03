@@ -1991,6 +1991,7 @@ sub SelectSearch {
   my $choice = $d->Show;
   return if $choice eq 'Cancel';
   my $file;
+  my $particular_trees=0;
   if ($choice=~/^File/) {
     my @sel;
     my $filelist_no='A';
@@ -2000,11 +2001,55 @@ sub SelectSearch {
 	      [
 		#  (map { $_->identify } @SEARCHES),
 		map((($file_no++).'. ')."File: ".$_, uniq(map $_->filename, grep ref, map(CurrentFile($_), TrEdWindows()), GetOpenFiles())),
-		map((($filelist_no++).'. ')."List: ".$_->name." (".$_->file_count." files)", grep $_->file_count, TrEdFileLists())
+		map((($filelist_no++).'. ')."List: ".$_->name #." (".$_->file_count." files)", grep $_->file_count
+		      , TrEdFileLists())
 	       ],
 	      \@sel,
 	      {
 		label => { -text=> qq{Select a file or file-list to search through} },
+		init => sub {
+		  my ($d,$l) = @_;
+		  my $f = $d->add('Frame')->pack(-expand => 1, -fill=>'x');
+		  $f->Checkbutton(-text=>'Particular Trees Only',
+				  -variable =>\$particular_trees,
+				 )->pack(-side=>'left');
+		  $f->Button(-text=>'Add List',
+			     -command => MacroCallback(sub {
+			        my $f = $d->getOpenFile(
+				  -filetypes=> 
+				    [["Filelists",           ['.fl']],
+				     ["All files",           ['*','*.*']]
+				    ],
+				  -title=> "Load filelist ...");
+				return unless ($f and -f $f);
+				my $fl = Filelist->new(undef, $f);
+				$fl->load();
+				if (AddNewFileList($fl)) {
+				  $l->insert('end',"List: ".$fl->name);
+				  $l->see('end');
+				  $l->selectionClear(0,'end');
+				  $l->selectionSet('end');
+				  $l->activate('end');
+				}
+			      })
+			    )->pack(-side=>'right');
+		  $f->Button(-text=>'Add File',
+			     -command => MacroCallback(sub {
+			        my $f = $d->getOpenFile(
+				  -filetypes => \@main::open_types,
+				  -title=> "Load file ...");
+				return unless ($f and -f $f);
+				my $idx=0;
+				my $last=$l->index('end');
+				$idx++ while ($idx<$last and $l->get($idx)=~/^(\d+)\. File:/);
+				$l->insert($idx,"$idx. File: ".$f);
+				$l->see($idx);
+				$l->selectionClear(0,'end');
+				$l->selectionSet($idx);
+				$l->activate($idx);
+			      })
+			    )->pack(-side=>'right');
+		},
 	      }
 	     ) || return;
     return unless @sel;
@@ -2018,11 +2063,11 @@ sub SelectSearch {
   } elsif ($choice =~ /^Treebank/) {
     $S=Tree_Query::HTTPSearch->new();
   } elsif ($choice =~ /^File/) {
-    if ($file=~s/^\S+. File: //) {
-      $S=Tree_Query::TrEdSearch->new({file => $file});
-    } elsif ($file=~s/^\S+. List: //) {
+    if ($file=~s/^(\S+. )?File: //) {
+      $S=Tree_Query::TrEdSearch->new({file => $file, particular_trees=>$particular_trees});
+    } elsif ($file=~s/^(\S+. )?List: //) {
       $file =~ s/ \([^\)]* files\)$//g;
-      $S=Tree_Query::TrEdSearch->new({filelist => $file});
+      $S=Tree_Query::TrEdSearch->new({filelist => $file, particular_trees=>$particular_trees});
     }
     #    } elsif ($choice =~ /^List/) {
     #      $S=Tree_Query::TrEdSearch->new({filelist => $file});
