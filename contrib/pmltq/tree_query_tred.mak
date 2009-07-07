@@ -104,11 +104,14 @@ sub search_first {
 	Open($self->{file},{-keep_related=>1});
 	GotoTree(1);
       }
+
+      local $main::no_secondary=1; # load secondary files lazily
       $evaluator->init_filters($evaluator->buffer_all_filter);
       while ($evaluator->find_next_match) {
 	$evaluator->run_filters
       }
       CloseFile();
+
       $results = $evaluator->flush_filters;
     };
     ($grp,$root,$this)=@save;
@@ -195,6 +198,7 @@ sub prepare_results {
 	GotoTree($self->{current_result} ? $self->{currentFilePos}+1 : 1);
       }
       my $result;
+      local $main::no_secondary=1; # load secondary files lazily
       eval {
 	$result = $self->{evaluator}->find_next_match();
 	if ($result) {

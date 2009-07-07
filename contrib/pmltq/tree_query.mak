@@ -807,8 +807,10 @@ sub new_tree_id {
 }
 
 sub NewQuery {
+  my ($class,$opts)=@_;
+  $opts||={};
   my $id = new_tree_id();
-  my $filename = DefaultQueryFile();
+  my $filename = ($opts->{query_file} || DefaultQueryFile());
   my $fl = first { $_->name eq 'Tree Queries' } TrEdFileLists();
   unless ($fl) {
     $fl = Filelist->new('Tree Queries');
@@ -848,14 +850,20 @@ END
   }
   my @trees = GetTrees();
   if (@trees) {
-    GotoTree(scalar(@trees));
+    GotoTree($opts->{tree_no} || scalar(@trees));
   }
-  if (!@trees or $root && $root->children) {
+  if (!@trees or !$opts->{tree_no} && $root && $root->children) {
     DetermineNodeType(NewTreeAfter());
+    $root->{id}=$id if $root;
   }
-  $root->{id}=$id if $root;
+
   ChangingFile(0);
-  SelectSearch() || return;
+  if ($opts->{new_search}) {
+    _NewSearch(Tree_Query::TrEdSearch->new($opts->{new_search}),$opts->{preserve_search});
+  } else {
+    return SelectSearch() unless $opts->{no_select};
+  }
+  return;
 }
 
 
@@ -2073,19 +2081,24 @@ sub SelectSearch {
     #      $S=Tree_Query::TrEdSearch->new({filelist => $file});
   }
   if ($S) {
-    if (!$preserve and $SEARCH) {
-      DestroyUserToolbar($SEARCH->identify);
-      @SEARCHES = grep { $_!=$SEARCH } @SEARCHES;
-      $SEARCH=undef;
-    }
-    my $ident = $S->identify;
-    @SEARCHES = grep { $_->identify ne $ident } @SEARCHES;
-    push @SEARCHES, $S;
-    SetSearch($S);
+    _NewSearch($S,$preserve);
   }
   # TODO
   #
   return $SEARCH;
+}
+
+sub _NewSearch {
+  my ($S,$preserve) = @_;
+  if (!$preserve and $SEARCH) {
+    DestroyUserToolbar($SEARCH->identify);
+    @SEARCHES = grep { $_!=$SEARCH } @SEARCHES;
+    $SEARCH=undef;
+  }
+  my $ident = $S->identify;
+  @SEARCHES = grep { $_->identify ne $ident } @SEARCHES;
+  push @SEARCHES, $S;
+  return SetSearch($S);
 }
 
 sub SetSearch {
@@ -2407,12 +2420,12 @@ sub EditQuery {
   my $no_childnodes = ($node->{'#name'} =~ /^(node|subquery)$/ and $opts->{no_childnodes}) ? 1 : 0;
   my $string = $opts->{string} || as_text($node,{no_childnodes=>$no_childnodes});
   my $result;
-  {
-    my $t0 = new Benchmark;
-    my $t1 = new Benchmark;
-    my $time = timestr(timediff($t1,$t0));
-    print "creating parser took: $time\n";
-  }
+  # {
+  #   my $t0 = new Benchmark;
+  #   my $t1 = new Benchmark;
+  #   my $time = timestr(timediff($t1,$t0));
+  #   print "creating parser took: $time\n";
+  # }
   eval { require Tk::TextUndo; };
   my $qopts={
     -widget => ['TextUndo', -background => 'white'],
@@ -2720,9 +2733,11 @@ sub EditQuery {
 	$result=parse_conditions($string,$opts); # returns ARRAY
       }
     };
-    my $t1 = new Benchmark;
-    my $time = timestr(timediff($t1,$t0));
-    print "parsing query took: $time\n";
+    #  {
+    #   my $t1 = new Benchmark;
+    #   my $time = timestr(timediff($t1,$t0));
+    #   print "parsing query took: $time\n";
+    # }
     last unless $@;
     if (ref($@) eq 'Tree_Query::ParserError' ) {
       $qopts->{-cursor} = $@->line.'.end';
@@ -2762,9 +2777,11 @@ sub EditQuery {
       DetermineNodeType($_) for ($node->descendants);
       eval { Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$node) } if $SEARCH;
     }
-    my $t1 = new Benchmark;
-    my $time = timestr(timediff($t1,$t0));
-    print "postprocessing took: $time\n";
+    # {
+    #   my $t1 = new Benchmark;
+    #   my $time = timestr(timediff($t1,$t0));
+    #   print "postprocessing took: $time\n";
+    # }
   }
   return 1;
 }
