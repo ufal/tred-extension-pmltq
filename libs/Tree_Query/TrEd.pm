@@ -38,7 +38,6 @@ sub show_current_result {
   return $self->show_result('current');
 }
 
-our $canOpenSecondary = exists(&TredMacro::OpenSecondaryFiles);
 
 sub show_result {
   my ($self,$dir)=@_;
@@ -84,10 +83,7 @@ sub show_result {
       if (defined $idx) {
 	my $result_fn = $self->get_nth_result_filename($idx);
 	if (defined($result_fn) and length($result_fn)) {
-	  my $fsfile = Open($result_fn,{-keep_related=>1});
-	  if ($fsfile and $canOpenSecondary) {
-	    OpenSecondaryFiles($fsfile); # we may have loaded the file lazily
-	  }
+	  Open($result_fn,{-keep_related=>1});
 	} else {
 	  CloseFileInWindow($win);
 	}

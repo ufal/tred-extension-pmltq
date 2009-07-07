@@ -3,7 +3,7 @@
 {
 
 package Tree_Query::TrEdSearch;
-use Benchmark;
+use Benchmark ':hireswallclock';
 use Carp;
 use strict;
 use warnings;
@@ -11,6 +11,7 @@ BEGIN { import TredMacro  }
 
 use Tree_Query::TrEd ();
 use Tree_Query::TypeMapper ();
+use Tree_Query::BtredEvaluator;
 
 use base qw(Tree_Query::TrEd Tree_Query::TypeMapper);
 
@@ -40,7 +41,6 @@ sub new {
 
 sub DESTROY {
   my ($self)=@_;
-  warn "DESTROING $self\n";
   RunCallback($self->{on_destroy}) if $self->{on_destroy};
   unregister_open_file_hook($self->{callback});
 }
@@ -95,6 +95,7 @@ sub search_first {
     my @save = ($grp,$root,$this);
     $grp=$search_win;
     my $results;
+    my $t0 = new Benchmark;
     eval {
       if ($self->{filelist}) {
 	SetCurrentFileList($self->{filelist},$search_win);
@@ -105,13 +106,14 @@ sub search_first {
 	GotoTree(1);
       }
 
+      local $main::noCheckLocks = 1;
+      local $main::lockFiles = 0;
       local $main::no_secondary=1; # load secondary files lazily
       $evaluator->init_filters($evaluator->buffer_all_filter);
       while ($evaluator->find_next_match) {
 	$evaluator->run_filters
       }
       CloseFile();
-
       $results = $evaluator->flush_filters;
     };
     ($grp,$root,$this)=@save;
@@ -119,13 +121,23 @@ sub search_first {
     undef $search_win;
     die $@ if $@;
 
+    my $t1 = new Benchmark;
+    my $time = timestr(timediff($t1,$t0));
+    print STDERR "Computing query took $time seconds\n";
+
     my $query_id = (ref($query) && $query->{id}) || '';
     my $how_many = scalar(@$results).' row'.(@$results != 1 ? 's' : '' );
-    return $results unless
-      (@$results < 200) or
-	QuestionQuery('Results',
-		      $how_many,
-		      'Display','Cancel') eq 'Display';
+    if (@$results >= 1000) {
+      my $ans = QuestionQuery('Results',
+			       $how_many,
+			       'Display','Save to File','Cancel');
+      if ($ans eq 'Save to File') {
+	Tree_Query::SaveResults($results,$query_id);
+	return $results;
+      } elsif ($ans eq 'Cancel') {
+	return $results;
+      }
+    }
     Tree_Query::ShowResultTable('Results ('.$how_many.')',
 				$results,
 				$query_id,
@@ -199,6 +211,35 @@ sub prepare_results {
       }
       my $result;
       local $main::no_secondary=1; # load secondary files lazily
+      my @save2;
+      if ($self->{filelist} and exists(&main::lockOpenFile)) {
+	@save2=($main::lockFiles,$main::noCheckLocks,CurrentFileNo());
+	$main::lockFiles = 0;
+	$main::noCheckLocks = 1;
+      }
+      my $time = time;
+      my $toolbar = GetUserToolbar($self->identify);
+      my $b = $toolbar->Button(
+	-text  => 'Stop',
+	-command => [sub {
+          $self->{evaluator}->stop;
+	},$self],
+	-padx => 2,
+	-font    =>'C_small',
+	-borderwidth => 0,
+	-takefocus=>0,
+	-relief => $main::buttonsRelief,
+	-image => Tree_Query::icon('button_cancel'),
+	-compound => 'top',
+       )->pack(-side=>'right',-padx => 5);
+      my $on_open = sub {
+	my $now=time;
+	return unless ($now>$time+1);
+	$time=$now;
+	${$self->{label}}="Searching file ".CurrentFileNo()." ... ";
+	$toolbar->update;
+      };
+      register_open_file_hook($on_open);
       eval {
 	$result = $self->{evaluator}->find_next_match();
 	if ($result) {
@@ -213,14 +254,30 @@ sub prepare_results {
 	  pop @{$self->{past_results}};
 	}
       };
+      unregister_open_file_hook($on_open);
+      $b->packForget;
+      $b->destroy;
+      my $err = $@;
+      if (@save2) {
+	($main::lockFiles,$main::noCheckLocks)=@save2;
+	my $fsfile = CurrentFile();
+	if ($save2[2]!=CurrentFileNo()) {
+	  main::lockOpenFile($grp,$fsfile);
+	}
+	OpenSecondaryFiles($fsfile); # we may have loaded the file lazily
+      }
       $self->{currentFilePos} = CurrentTreeNumber($search_win);
       $self->{currentFilelistPos} = CurrentFileNo($search_win);
       # $Redraw='all';
       ($grp,$root,$this)=@save;
-      die $@ if $@;
-      unless ($result) {
+    die $err if $err;
+    unless ($result) {
+      if ($Tree_Query::BtredEvaluator::STOP) {
+	QuestionQuery('TrEdSearch','Interrupted by user','OK');
+      } else {
 	QuestionQuery('TrEdSearch','No more matches','OK');
       }
+    }
     }
   } elsif ($dir eq 'prev') {
     return unless $self->{evaluator};

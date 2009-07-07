@@ -2969,39 +2969,41 @@ sub ShowResultTable {
     ->pack(-side=> 'left', -expand=> 1,  -padx=> 1, -pady=> 1);
   $bottom->Button(
     -text=>'Save To File',
-    -command => [
-      sub {
-	my $d=shift;
-	my $filename = main::get_save_filename(
-	  $d,
-	  -filetypes=>[["CSV",['.csv','.txt']],
-		       ["All files",['*','*.*']],
-		      ],
-	  -title => "Save results as ...",
-	  -initialfile=> ($query_id ? "results_for_".$query_id.".txt" : 'results.txt'),
-	 );
-	return unless defined($filename) and length($filename);
-	my $backup;
-	if (-f $filename) {
-	  $backup=1 if rename $filename, $filename.'~';
-	}
-	if (open my $fh, '>:utf8', $filename) {
-	  for (@$results) {
-	    print $fh join("\t",@$_)."\n";
-	  }
-	  close $fh;
-	} else {
-	  TrEd::Basics::errorMessage($d,'Cannot write to '.$filename.': '.$!);
-	  if ($backup) {
-	    rename $filename.'~', $filename;
-	  }
-	}
-      },$d])
+    -command => [\&saveResults,$results,$query_id,$d])
     ->pack(-side=> 'left', -expand=> 1,  -padx=> 1, -pady=> 1);
   $t->focus();
   $d->Popup;
+  # $d->destroy;
 }
 
+sub SaveResults {
+  my ($results,$query_id,$d)=@_;
+  $d ||= ToplevelFrame();
+  my $filename = main::get_save_filename(
+    $d,
+    -filetypes=>[["CSV",['.csv','.txt']],
+		 ["All files",['*','*.*']],
+		],
+    -title => "Save results as ...",
+    -initialfile=> ($query_id ? "results_for_".$query_id.".txt" : 'results.txt'),
+   );
+  return unless defined($filename) and length($filename);
+  my $backup;
+  if (-f $filename) {
+    $backup=1 if rename $filename, $filename.'~';
+  }
+  if (open my $fh, '>:utf8', $filename) {
+    for (@$results) {
+      print $fh join("\t",@$_)."\n";
+    }
+    close $fh;
+  } else {
+    TrEd::Basics::errorMessage($d,'Cannot write to '.$filename.': '.$!);
+    if ($backup) {
+      rename $filename.'~', $filename;
+    }
+  }
+}
 
 } # use strict
 1;

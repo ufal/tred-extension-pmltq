@@ -190,13 +190,19 @@ sub search_first {
     $limit=$row_limit unless $returns_nodes;
     my $how_many = (($limit and $matches==$limit) ? '>=' : '').
       $matches.($returns_nodes ? ' match'.($matches>1?'es':'') : ' row'.($matches>1?'s':''));
-    return $results unless
-      (!$returns_nodes and $matches<200) or
-	QuestionQuery('Results',
-		      $how_many,
-		      'Display','Cancel') eq 'Display';
     unless ($returns_nodes) {
-      my $res = Tree_Query::ShowResultTable("Results ($how_many)",$results,$query_id);
+      if (@$results >= 1000) {
+	my $ans = QuestionQuery('Results',
+				$how_many,
+				'Display','Save to File','Cancel');
+	if ($ans eq 'Save to File') {
+	  Tree_Query::SaveResults($results,$query_id);
+	  return $results;
+	} elsif ($ans eq 'Cancel') {
+	  return $results;
+	}
+      }
+      Tree_Query::ShowResultTable("Results ($how_many)",$results,$query_id);
       return;
     }
     {
