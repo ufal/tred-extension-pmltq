@@ -1266,6 +1266,15 @@ sub arrow {
   my $rel = shift;
   return $arrow{$rel} || 'first';
 }
+
+sub arrow_dash2 {
+  my ($rel,$is_negated,$is_transitive)=@_;
+  my $transitive=$is_transitive ? '{' : '';
+  return ($is_negated ? 
+	     ($dash{'!'.$rel.$transitive}||$dash{'!'.$transitive})
+	       : $dash{$rel.$transitive}||$dash{$transitive}||'');
+}
+
 sub arrow_dash {
   my ($rel,$node) = @_;
   if ($rel=~s/\{.*//) {
@@ -1396,8 +1405,7 @@ sub after_redraw_hook {
     my $width = $r eq 'member' ? $scale : $lw*$scale;
     $c->createLine($scale * 75, $y, $scale * 15, $y,
 		   -fill => $color,
-		   
-		   (-dash => [split ',',($negate ? $dash{'!'.$name.$transitive}||$dash{'!'.$transitive} : $dash{$name.$transitive}||$dash{$transitive}||'')]),
+		   -dash => [split ',',arrow_dash2($name,$negate,$transitive)],
 		   -arrow => $arrow{$name}||'first',
 		   -arrowshape => [14,20,4],
 		   -tags => ['scale_width','legend']
@@ -1482,8 +1490,9 @@ sub node_style_hook {
 	my $target = $ref->{target};
 	my $negate = ($node!=$ref && $ref->parent->{'#name'} eq 'not') ? 1 : 0;
 	my $text = Tree_Query::Common::rel_as_text($ref);
-	$text = '! '.$text if $negate;
 	my $color = $showHidden ? 'gray' : arrow_color($name);
+	$name = $text;
+	$name = '! '.$name if $negate;
 	scalar {
 	  -target => $name2node_hash{$target},
 	  -fill   => $color,
@@ -1491,11 +1500,9 @@ sub node_style_hook {
 	     qq{shape=line;force=45%;start=30;step=30;stop=-30;repeat=1000;coords=-3,-3,3,3;tag=scale_width,line;fill=$color;width=$width;rotate=1}.
 	     qq{|shape=line;force=45%;start=30;step=30;stop=-30;repeat=1000;coords=3,-3,-3,3;tag=scale_width,line;fill=$color;width=$width;rotate=1}
 	       : ''),
-	  (-dash   => $negate ?
-	     (($text=~/{/) ? $dash{'!'.$1}||$dash{'!{'} : $dash{'!'.$text}||$dash{'!'})
-	     : (($text=~/{/) ? $dash{$1}||$dash{'{'} : $dash{$text}||'')),
+	  -dash   => arrow_dash2($text,$negate,($text=~/\{/ ? 1 : 0)),
 	  -raise => 8+16*(++$i),
-	  -hint => $text,
+	  -hint => $name,
 	  -tag => 'relation:'.$ref,
 	}
       } SeqV($ref->attr('relation'))
