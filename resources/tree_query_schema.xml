@@ -198,7 +198,8 @@
   <type name="q-output.type">
     <structure>
       <member name="distinct"><cdata format="boolean"/></member>
-      <member name="return" required="1" type="q-columns.type"/>
+      <member name="return" type="q-columns.type"/>
+      <member name="where" type="q-col-group.type"/>
       <member name="group-by" type="q-columns.type"/>
       <member name="sort-by" type="q-columns.type"/>
     </structure>
@@ -238,7 +239,18 @@
       </member>
     </structure>
   </type>
-
+  <type name="col-expr-seq.type">
+    <sequence>
+      <element name="test" type="q-test.type"/>
+      <element name="not" type="q-col-group.type"/>
+      <element name="or" type="q-col-group.type"/>
+      <element name="and" type="q-col-group.type"/>
+    </sequence>
+  </type>
+  <type name="q-col-group.type">
+    <container type="col-expr-seq.type" role="#NODE">
+    </container>
+  </type>
   <type name="expr-seq.type">
     <sequence role="#CHILDNODES">
       <element name="subquery" type="q-subquery.type"/>
