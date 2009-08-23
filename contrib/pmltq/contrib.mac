@@ -21,6 +21,7 @@ package Tree_Query::TrEd; # so that it gets reloaded
 package Tree_Query::Common; # so that it gets reloaded
 package Tree_Query::NG2PMLTQ; # so that it gets reloaded
 package Tree_Query::BtredEvaluator; # so that it gets reloaded
+package PMLTQ::Relation; # so that it gets reloaded
 
 #include "tree_query_http.mak"
 #include "tree_query_tred.mak"

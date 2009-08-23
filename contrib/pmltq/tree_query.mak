@@ -1623,7 +1623,7 @@ sub CutPasteWithRelations {
   my @delete;
   for my $ref (grep { $_->{'#name'} eq 'ref' and $_->{'target'} eq $node->{name} } $node->root->descendants) {
     next unless SeqV($ref->{relation});
-    my $is_reversible = isReversible($ref->{relation});
+    my $is_reversible = undef;
     my $ref_node = $ref;
     my $start = $ref->parent;
     if ($start->{'#name'} !~ /^(node|subquery)$/) {
@@ -1640,6 +1640,8 @@ sub CutPasteWithRelations {
       }
     }
     next unless $start;
+    $is_reversible=isReversible($start->{'node-type'},$ref->{relation})
+      unless defined $is_reversible;
     my $cmp = cmp_subquery_scope($start,$new_parent);
     if ($cmp<0) {
       if ($is_reversible) {
@@ -1674,7 +1676,7 @@ sub CutPasteWithRelations {
   for my $r (@revert) {
     my ($ref_node,$start,$ref) = @$r;
     ChangingFile(1);
-    ReverseRelation($ref->{relation});
+    ReverseRelation($start->{'node-type'}, $ref->{relation});
     $ref->{target} = GetNodeName($start);
     CutPastePreserveOrder($ref_node,$node);
   }
@@ -1690,7 +1692,7 @@ sub CutPasteWithRelations {
   if (!$ref_from_new_parent) {
     ($ref_to_new_parent)  = grep { $_->{'#name'} eq 'ref' and $_->{'target'} eq $new_parent->{name} } $node->children;
     if ($ref_to_new_parent) {
-      undef $ref_to_new_parent unless isReversible($ref_to_new_parent->{relation});
+      undef $ref_to_new_parent unless isReversible($node->{'node-type'},$ref_to_new_parent->{relation});
     }
   }
 
@@ -1701,14 +1703,14 @@ sub CutPasteWithRelations {
     my $cmp = cmp_subquery_scope($old_parent,$new_parent);
     if ($cmp<0) {
       if (SeqV($node->{relation})) {
-	if (isReversible($node->{relation})) {
+	if (isReversible($old_parent->{'node-type'},$node->{relation})) {
 	  ChangingFile(1);
 	  $forget_relation = 1;
 	  my $ref = NewSon($node);
 	  $ref->{'#name'}='ref';
 	  DetermineNodeType($ref);
 	  $ref->{target} = GetNodeName($old_parent);
-	  $ref->{relation} = ReverseRelation(delete $node->{relation});
+	  $ref->{relation} = ReverseRelation($old_parent->{'node-type'},delete $node->{relation});
 	} else {
 	  return (QuestionQuery(
 	    "Pasting to a subquery",
@@ -1766,7 +1768,7 @@ sub CutPasteWithRelations {
     if ($ref) {
       ChangingFile(1);
       $node->{relation} = delete $ref->{relation};
-      ReverseRelation($node->{relation}) if $ref_to_new_parent;
+      ReverseRelation($node->{'node-type'},$node->{relation}) if $ref_to_new_parent;
       DeleteLeafNode($ref);
       CutPastePreserveOrder($node,$new_parent);
       DetermineNodeType($node);
@@ -1796,18 +1798,18 @@ sub CutPastePreserveOrder {
 }
 
 sub isReversible {
-  my ($relation)=@_;
+  my ($node_type,$relation)=@_;
   my ($rel) = SeqV($relation);
   my $rel_name = _rel_name($rel);
-  my $reversed_name = Tree_Query::Common::reversed_relation($rel_name);
+  my $reversed_name = Tree_Query::Common::reversed_relation($rel_name,$node_type);
   return $reversed_name || undef;
 }
 
 sub ReverseRelation {
-  my ($relation)=@_;
+  my ($node_type,$relation)=@_;
   croak("Cannot call ReverseRelation() on undefined value") unless $relation;
   my ($rel)=SeqV($relation);
-  my $reversed_name = Tree_Query::Common::reversed_relation(_rel_name($rel));
+  my $reversed_name = Tree_Query::Common::reversed_relation(_rel_name($rel),$node_type);
   if ($reversed_name) {
     if ($reversed_name=~s/^(user-defined|implementation|pmlrf)://) {
       $rel->set_name('user-defined');
