@@ -15,7 +15,16 @@ my %start_to_target_type_map;
 for my $dir (@INC) {
   next if ref $dir;
   for my $module (glob(File::Spec->catfile($dir,'PMLTQ','Relation','*.pm'))) {
-    require $module;
+    my $return = do $module;
+    unless ($return) {
+      if ($@) {
+	warn "Failed to load PMLTQ::Relation submodule $module: $@\n";
+      } elsif (!defined $return) {
+	warn "Failed to compile PMLTQ::Relation submodule $module: $!\n";
+      } elsif (!$return) {
+	warn "PMLTQ::Relation submodule $module did not return a true value.\n";
+      }
+    }
   }
 }
 
@@ -69,6 +78,81 @@ sub test_code {
   return $rel && $rel->{test_code};
   return undef;
 }
+
+#################################################
+{
+  package PMLTQ::Relation::Iterator;
+  use strict;
+  use constant CONDITIONS=>0;
+  use Carp;
+  sub new {
+    my ($class,$conditions)=@_;
+    croak "usage: $class->new(sub{...})" unless ref($conditions) eq 'CODE';
+    return bless [$conditions],$class;
+  }
+  sub clone {
+    my ($self)=@_;
+    return bless [$self->[CONDITIONS]], ref($self);
+  }
+  sub conditions { return $_[0]->[CONDITIONS]; }
+  sub set_conditions { $_[0]->[CONDITIONS]=$_[1]; }
+  sub start {}
+  sub next {}
+  sub node {}
+  sub reset {}
+}
+
+#################################################
+{
+  package PMLTQ::Relation::SimpleListIterator;
+  use strict;
+  use base qw(PMLTQ::Relation::Iterator);
+  use constant CONDITIONS=>0;
+  use constant NODES=>1;
+  use constant FILE=>2;
+  use constant FIRST_FREE=>3; # number of the first constant free for user
+  sub start  {
+    my ($self,$node,$fsfile)=@_;
+    $self->[FILE]=$fsfile;
+    my $nodes = $self->[NODES] = $self->get_node_list($node);
+    my $n = $nodes->[0];
+    return ($n && $self->[CONDITIONS]->(@$n)) ? $n->[0] : ($n->[0] && $self->next);
+  }
+  sub next {
+    my ($self)=@_;
+    my $nodes = $self->[NODES];
+    my $conditions=$self->[CONDITIONS];
+    shift @{$nodes};
+    my $n;
+    while (($n = $nodes->[0]) and !$conditions->(@$n)) {
+      shift @{$nodes};
+    }
+    return $nodes->[0][0];
+  }
+  sub node {
+    my ($self)=@_;
+    my $n = $self->[NODES][0];
+    return $n && $n->[0];
+  }
+  sub file {
+    my ($self)=@_;
+    my $n = $self->[NODES][0];
+    return $n && $n->[1];
+  }
+  sub reset {
+    my ($self)=@_;
+    $self->[NODES]=undef;
+    $self->[FILE]=undef;
+  }
+  sub get_node_list {
+    return [];
+  }
+  sub start_file {
+    my ($self)=@_;
+    return $self->[FILE];
+  }
+}
+
 
 1;
 __END__
