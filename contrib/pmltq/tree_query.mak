@@ -850,6 +850,7 @@ END
     push @main::openfiles, $fsfile;
     SetCurrentFileList($fl->name);
     ResumeFile($fsfile);
+    SwitchContext(__PACKAGE__);
   } else {
     SetCurrentFileList($fl->name);
     Open($filename);
