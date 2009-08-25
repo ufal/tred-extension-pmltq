@@ -155,7 +155,7 @@ my @TOOLBAR_BINDINGS = (
     command => 'paste_as_new_tree',
     key => 'Ctrl+Shift+'.$insert_key,
     menu => 'Paste as new tree',
-    toolbar => ['Paste New Tree', 'editpaste'],
+    toolbar => ['Paste new tree', 'editpaste'],
   },
   '---',
   {
@@ -280,7 +280,7 @@ my @TOOLBAR_BINDINGS = (
     key => 'R',
     changing_file => 0,
     menu => 'Create relation from the current node to a given node',
-    toolbar => ['Add Rel','add_relation' ],
+    toolbar => ['Add rel','add_relation' ],
   },
   '---',
   {
@@ -584,9 +584,18 @@ D0EA2B b7ce1c6b0d0c E2F9FF  c1881d075743  0247FE
 #remove-menu Trim (remove all but current subtree)
 
 # Setup context
+
+sub detect {
+  return (SchemaName() eq 'tree_query') ? 1 : 0;
+}
+
 unshift @TredMacro::AUTO_CONTEXT_GUESSING, sub {
-  SchemaName() eq 'tree_query' ? __PACKAGE__ : undef ;
+  detect() ? __PACKAGE__ : undef ;
 };
+
+sub allow_switch_context_hook {
+  return 'stop' unless detect();
+}
 
 my %icons;
 sub icon {
@@ -604,9 +613,6 @@ sub icon {
   }
 }
 
-sub allow_switch_context_hook {
-  return 'stop' if SchemaName() ne 'tree_query';
-}
 
 #ifdef TRED
 sub macros_reloaded_hook {
@@ -859,7 +865,7 @@ END
 
   ChangingFile(0);
   if ($opts->{new_search}) {
-    _NewSearch(Tree_Query::TrEdSearch->new($opts->{new_search}),$opts->{preserve_search});
+    return _NewSearch(Tree_Query::TrEdSearch->new($opts->{new_search}),$opts->{preserve_search});
   } else {
     return SelectSearch() unless $opts->{no_select};
   }
@@ -2009,6 +2015,7 @@ sub SelectSearch {
   return if $choice eq 'Cancel';
   my $file;
   my $particular_trees=0;
+  my $top_layer_only=0;
   if ($choice=~/^File/) {
     my @sel;
     my $filelist_no='A';
@@ -2029,6 +2036,9 @@ sub SelectSearch {
 		  my $f = $d->add('Frame')->pack(-expand => 1, -fill=>'x');
 		  $f->Checkbutton(-text=>'Particular Trees Only',
 				  -variable =>\$particular_trees,
+				 )->pack(-side=>'left');
+		  $f->Checkbutton(-text=>'Top-Level Document Only',
+				  -variable =>\$top_layer_only,
 				 )->pack(-side=>'left');
 		  $f->Button(-text=>'Add List',
 			     -command => MacroCallback(sub {
@@ -2081,10 +2091,10 @@ sub SelectSearch {
     $S=Tree_Query::HTTPSearch->new();
   } elsif ($choice =~ /^File/) {
     if ($file=~s/^(\S+. )?File: //) {
-      $S=Tree_Query::TrEdSearch->new({file => $file, particular_trees=>$particular_trees});
+      $S=Tree_Query::TrEdSearch->new({file => $file, particular_trees=>$particular_trees, top_layer_only=>$top_layer_only});
     } elsif ($file=~s/^(\S+. )?List: //) {
       $file =~ s/ \([^\)]* files\)$//g;
-      $S=Tree_Query::TrEdSearch->new({filelist => $file, particular_trees=>$particular_trees});
+      $S=Tree_Query::TrEdSearch->new({filelist => $file, particular_trees=>$particular_trees, top_layer_only=>$top_layer_only});
     }
     #    } elsif ($choice =~ /^List/) {
     #      $S=Tree_Query::TrEdSearch->new({filelist => $file});
@@ -2123,6 +2133,7 @@ sub SetSearch {
       $lab->configure(-font=> $name eq $ident ? 'C_small_bold' : 'C_small' ) if $lab;
     }
   }
+  return $SEARCH;
 }
 
 sub CreateSearchToolbar {
@@ -2232,19 +2243,22 @@ sub CreateSearchToolbar {
 	      -relief => $main::buttonsRelief,
 	      -borderwidth=> $main::buttonBorderWidth,
 	      -image => icon('16x16/remove'),
-	      -command => MacroCallback([sub {
-					   my $ident=shift;
-					   DestroyUserToolbar($ident);
-					   my ($s) = grep { $_->identify eq $ident } @SEARCHES;
-					   @SEARCHES = grep { $_ != $s } @SEARCHES;
-					   $SEARCH = undef if $SEARCH and $SEARCH == $s;
-					   ChangingFile(0);
-					 },$ident])
+	      -command => MacroCallback([\&DestroySearch, $ident])
 	     )->pack(-side=>'right');
   AttachTooltip($b,'Close this search.');
   my $label;
   $tb->Label(-textvariable=>\$label,-font=>'C_small')->pack(-side=>'right',-padx => 5);
   return ($tb,\$label);
+}
+
+sub DestroySearch {
+  shift if @_==2;
+  my $ident=shift;
+  DestroyUserToolbar($ident);
+  my ($s) = grep { $_->identify eq $ident } @SEARCHES;
+  @SEARCHES = grep { $_ != $s } @SEARCHES;
+  $SEARCH = undef if $SEARCH and $SEARCH == $s;
+  ChangingFile(0);
 }
 
 sub EditNodeConditions {
@@ -2307,21 +2321,6 @@ sub _find_type_in_query_string {
   return ($type,$var);
 }
 
-sub _find_element_names_for_decl {
-  my ($decl)=@_;
-  my %names;
-  $decl->get_schema->for_each_decl(
-    sub {
-      my ($d)=@_;
-      if ($d->get_decl_type == PML_ELEMENT_DECL
-	    and $d->get_content_decl == $decl) {
-	$names{ $d->get_name } = 1;
-      }
-    }
-   );
-  return [sort keys %names];
-}
-
 sub _editor_offer_values {
   my ($ed,$operator,$qn) = @_;
   my @sel;
@@ -2342,7 +2341,7 @@ sub _editor_offer_values {
       my $decl = $SEARCH->get_decl_for($type);
       my @values;
       if ($is_name) {
-	@values = @{_find_element_names_for_decl($decl)};
+	@values = @{Tree_Query::Common::GetElementNamesForDecl($decl)};
       } elsif ($decl and ($decl = $decl->find($attr))) {
 	my $decl_is = $decl->get_decl_type;
 	while ($decl_is == PML_ALT_DECL or
@@ -2591,7 +2590,7 @@ sub EditQuery {
 			   my $decl = $SEARCH->get_decl_for($type);
 			   if ($decl) {
 			     my @res = map { my $t = $_; $t=~s{#content}{[]}g; $t } $decl->get_paths_to_atoms({ no_childnodes => 1 });
-			     if (@{ _find_element_names_for_decl($decl) }) {
+			     if (@{ Tree_Query::Common::GetElementNamesForDecl($decl) }) {
 			       unshift @res, 'name()';
 			     }
 			     if (@res) {
@@ -2978,7 +2977,7 @@ sub ShowResultTable {
     ->pack(-side=> 'left', -expand=> 1,  -padx=> 1, -pady=> 1);
   $bottom->Button(
     -text=>'Save To File',
-    -command => [\&saveResults,$results,$query_id,$d])
+    -command => [\&SaveResults,$results,$query_id,$d])
     ->pack(-side=> 'left', -expand=> 1,  -padx=> 1, -pady=> 1);
   $t->focus();
   $d->Popup;

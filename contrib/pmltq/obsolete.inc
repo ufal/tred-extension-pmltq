@@ -1,4 +1,5 @@
-# 
+# -*- cperl -*-
+#
 # remove non-extension version of Tree_Query
 
 BEGIN {
