@@ -152,7 +152,16 @@ my @TOOLBAR_BINDINGS = (
     toolbar => ['Paste', 'editpaste'],
   },
   {
-    command => 'paste_as_new_tree',
+    command => sub {
+      paste_as_new_tree();
+      my %ids = map { $_->{id} => 1 } GetTrees();
+      my $id = $root->{id};
+      $id=~s/_copy\d*$//;
+      $id .= '_copy';
+      my $suffix = '';
+      $suffix++ while (exists $ids{$id.$suffix});
+      $root->{id} = $id.$suffix;
+    },
     key => 'Ctrl+Shift+'.$insert_key,
     menu => 'Paste as new tree',
     toolbar => ['Paste new tree', 'editpaste'],
