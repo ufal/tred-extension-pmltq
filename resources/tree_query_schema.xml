@@ -240,7 +240,7 @@
     </structure>
   </type>
   <type name="col-expr-seq.type">
-    <sequence>
+    <sequence role="#CHILDNODES">
       <element name="test" type="q-test.type"/>
       <element name="not" type="q-col-group.type"/>
       <element name="or" type="q-col-group.type"/>
