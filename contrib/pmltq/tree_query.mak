@@ -2673,7 +2673,7 @@ sub EditQuery {
 		    ? ()
 		    : (qw| >> |,
                        [q|Grouping: for/give/sort by| => qq|for ...\n    give distinct ...\n    sort by ...|],
-		       ['Aggregation function' => [map { $_.'()' }
+		       ['Group Function' => [map { $_.'()' }
 						  sort
 						    qw( min max sum avg count ratio concat )
 						   ]]),
@@ -2982,12 +2982,12 @@ sub ShowResultTable {
   $t->BindMouseWheelVert();
 
   my $bottom=$d->Frame()->pack(qw/-side bottom -fill x/);
-  $bottom->Button(-text=> 'Close',
-		  -command=> [sub { shift->destroy; },$d])
-    ->pack(-side=> 'left', -expand=> 1,  -padx=> 1, -pady=> 1);
   $bottom->Button(
     -text=>'Save To File',
     -command => [\&SaveResults,$results,$query_id,$d])
+    ->pack(-side=> 'left', -expand=> 1,  -padx=> 1, -pady=> 1);
+  $bottom->Button(-text=> 'Close',
+		  -command=> [sub { shift->destroy; },$d])
     ->pack(-side=> 'left', -expand=> 1,  -padx=> 1, -pady=> 1);
   $t->focus();
   $d->Popup;
