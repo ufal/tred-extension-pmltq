@@ -1233,6 +1233,8 @@ my %color = (
   'parent' => '#779',
   'descendant' => 'black',
   'ancestor' => '#779',
+  'sibling' => '#777',
+
 #  'descendant' => 'blue',
 #  'ancestor' => 'lightblue',
   'same-tree-as' => '#eea',
