@@ -486,8 +486,9 @@ sub get_relation_target_type {
 #### Private API
 
 sub edit_config {
-  my ($title,$data,$type,$focus)=@_;
-  ToplevelFrame()->TrEdNodeEditDlg({
+  my ($title,$data,$type,$focus,$top)=@_;
+  $top ||= ToplevelFrame();
+  $top->TrEdNodeEditDlg({
     title => $title,
     type => $type,
     object => $data,
@@ -574,6 +575,7 @@ sub init {
   my $cfgs = $self->{config}{pml}->get_root->{configurations};
   my $cfg_type = $self->{config}{type};
   if (GUI() and !$id) {
+    require Tk::QueryDialog;
     my @opts = ((map { $_->{id} } map $_->value, grep $_->name eq 'http', SeqV($cfgs)));
     unless (@opts) {
       my $cfg = Fslib::Struct->new();
@@ -596,7 +598,9 @@ sub init {
 		    -command => [sub {
 				   my $l = pop @_;
 				   my $cfg = Fslib::Struct->new();
-				   edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
+				   do {
+				     edit_config('Edit connection',$cfg,$cfg_type,'id',$l->toplevel) || return;
+				   } while (!$cfg->{id} or !PMLSchema::CDATA->check_string_format($cfg->{id},'ID'));
 				   $cfgs->push_element('http',$cfg);
 				   $self->{config}{pml}->save();
 				   $l->insert('end',$cfg->{id});
@@ -616,7 +620,7 @@ sub init {
 				   return unless $cfg;
 				   $cfg = Fslib::CloneValue($cfg);
 				   $cfg->{id}=undef;
-				   edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
+				   edit_config('Edit connection',$cfg,$cfg_type,'id',$l->toplevel) || return;
 				   $cfgs->push_element('http',$cfg);
 				   $self->{config}{pml}->save();
 				   $l->insert('end',$cfg->{id});
@@ -633,7 +637,7 @@ sub init {
 				   my $id = $l->get('active');
 				   if ($id) {
 				     my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
-				     edit_config('Edit connection',$cfg,$cfg_type,'url') || return;
+				     edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
 				     $self->{config}{pml}->save();
 				     if ($cfg->{id} ne $id) {
 				       $l->insert('active',$cfg->{id});
@@ -648,9 +652,11 @@ sub init {
 				   my $l = pop @_;
 				   my $id = $l->get('active');
 				   if ($id and
-				       QuestionQuery('Delete connection',
-						     qq{Really delete connection '$id'?},
-						     'Delete','Cancel') eq 'Delete') {
+					 $l->QuestionQuery(
+					   -title => 'Delete connection',
+					   -label => qq{Really delete connection '$id'?},
+					   -buttons => ['Delete','Cancel'],
+					  ) eq 'Delete') {
 				     $l->delete('active');
 				     my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
 				     if ($cfg) {

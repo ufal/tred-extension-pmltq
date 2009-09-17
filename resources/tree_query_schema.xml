@@ -69,7 +69,7 @@
       </attribute>
     </container>
   </derive>
-  <derive name="q-parent-relation.type" type="q-child-relation.type">
+  <derive name="q-parent-relation.type" type="q-base-relation.type">
     <container>
       <attribute name="label">
 	<constant>parent</constant>
@@ -88,6 +88,23 @@
       </attribute>
     </container>
   </derive>
+  <derive name="q-relation-with-int-minmax.type" type="q-base-relation.type">
+    <container>
+      <attribute name="min_length">
+	<cdata format="integer"/>
+      </attribute>
+      <attribute name="max_length">
+	<cdata format="integer"/>
+      </attribute>
+    </container>
+  </derive>
+  <derive name="q-sibling-relation.type" type="q-relation-with-int-minmax.type">
+    <container>
+      <attribute name="label">
+	<constant>sibling</constant>
+      </attribute>
+    </container>
+  </derive>
   <derive name="q-depth-first-precedes.type" type="q-base-relation.type">
     <container>
       <attribute name="label">
@@ -102,7 +119,7 @@
       </attribute>
     </container>
   </derive>
-  <derive name="q-order-precedes.type" type="q-base-relation.type">
+  <derive name="q-order-precedes.type" type="q-relation-with-int-minmax.type">
     <container>
       <attribute name="label">
 	<constant>order-precedes</constant>
@@ -139,7 +156,7 @@
   </type>
 
   <type name="q-relation.type">
-    <sequence content_pattern="(member|child|parent|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-document-as|same-tree-as)?">
+    <sequence content_pattern="(member|child|parent|sibling|descendant|ancestor|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-document-as|same-tree-as)?">
       <element name="same-document-as" type="q-same-document-as.type"/>
       <element name="same-tree-as" type="q-same-tree-as.type"/>
       <element name="depth-first-precedes" type="q-depth-first-precedes.type"/>
@@ -148,6 +165,7 @@
       <element name="order-follows" type="q-order-follows.type"/>
       <element name="ancestor" type="q-ancestor-relation.type"/>
       <element name="parent" type="q-parent-relation.type"/>
+      <element name="sibling" type="q-sibling-relation.type"/>
       <element name="child" type="q-child-relation.type"/>
       <element name="descendant" type="q-descendant-relation.type"/>
       <element name="member" type="q-member-relation.type"/>
@@ -156,7 +174,7 @@
   </type>
 
   <type name="q-ref-relation.type">
-    <sequence content_pattern="(descendant|ancestor|parent|child|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-document-as|same-tree-as)?">
+    <sequence content_pattern="(descendant|ancestor|parent|sibling|child|depth-first-precedes|depth-first-follows|order-precedes|order-follows|user-defined|same-document-as|same-tree-as)?">
       <element name="same-document-as" type="q-same-document-as.type"/>
       <element name="same-tree-as" type="q-same-tree-as.type"/>
       <element name="depth-first-precedes" type="q-depth-first-precedes.type"/>
@@ -165,6 +183,7 @@
       <element name="order-follows" type="q-order-follows.type"/>
       <element name="ancestor" type="q-ancestor-relation.type"/>
       <element name="parent" type="q-parent-relation.type"/>
+      <element name="sibling" type="q-sibling-relation.type"/>
       <element name="child" type="q-child-relation.type"/>
       <element name="descendant" type="q-descendant-relation.type"/>
       <element name="user-defined" type="q-user-relation.type"/> 
