@@ -50,6 +50,19 @@
       <member name="url"><cdata format="anyURI"/></member>
       <member name="username"><cdata format="NMTOKEN"/></member>
       <member name="password"><cdata format="any"/></member>
+      <member name="cached_description">
+	<structure>
+	  <member name="title" required="1">
+	    <cdata format="any"/>
+	  </member>
+	  <member name="abstract">
+	    <cdata format="any"/>
+	  </member>	  
+	  <member name="moreinfo" as_attribute="1">
+	    <cdata format="anyURI"/>
+	  </member>
+	</structure>
+      </member>
     </structure>
   </type>
 </pml_schema>
