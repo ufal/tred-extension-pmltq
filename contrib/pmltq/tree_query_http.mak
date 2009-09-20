@@ -574,7 +574,7 @@ sub _request {
 
 sub _cfg_label {
   my ($cfg)=@_;
-  return $cfg->{id}." : ".PMLInstance::get_data($cfg,'cached_description/title');
+  return $cfg->{id}." : ".(PMLInstance::get_data($cfg,'cached_description/title')||'');
 }
 sub _cfg_id_from_label {
   my ($label)=@_;
@@ -586,130 +586,124 @@ sub init {
   my ($self,$config_file,$id)=@_;
   $self->load_config_file($config_file) || return;
   my $configuration = $self->{config}{data};
+
   my $cfgs = $self->{config}{pml}->get_root->{configurations};
   my $cfg_type = $self->{config}{type};
   if (GUI() and !$id) {
     require Tk::QueryDialog;
-    my @opts = ((map _cfg_label($_), map $_->value, grep $_->name eq 'http', SeqV($cfgs)));
-    unless (@opts) {
+    my @confs = (map $_->value, grep $_->name eq 'http', SeqV($cfgs));
+    unless (@confs) {
       my $cfg = Fslib::Struct->new();
       edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
       $cfgs->push_element('http',$cfg);
       $self->{config}{pml}->save();
-      push @opts, _cfg_label($cfg);
+      push @confs, $cfg;
     }
+    my $d=ToplevelFrame()->DialogBox(
+      -title => 'Select Connection',
+      -buttons => [qw(Select New Add Info Edit Remove Close)],
+    );
+    my $hlist = $d->Scrolled(
+      'HList',
+      -scrollbars => 'osoe',
+      -columns => 3,
+      -itemtype => 'text',
+      -selectmode => 'browse',
+      -width => 0,
+      -height => (@confs>10 ? scalar(@confs) : 10),
+    )->pack(-expand =>1, -fill => 'both');
+    eval { $d->configure(-focus => $hlist); };
+    $self->_add_cfg_items_to_hlist($hlist, \@confs, $configuration && $configuration->{id});
+    $d->BindEscape();
+    $d->BindButtons();
+    $d->Subwidget('B_New')->configure(
+      -command => [sub {
+		     my $l = pop @_;
+		     my $cfg = Fslib::Struct->new();
+		     do {
+		       edit_config('Edit connection',$cfg,$cfg_type,'id',$l->toplevel) || return;
+		     } while (!$cfg->{id} or !PMLSchema::CDATA->check_string_format($cfg->{id},'ID'));
+		     $cfgs->push_element('http',$cfg);
+		     my $item = $l->add($cfg->{id}, -data => $cfg);
+		     $l->see($item);
+		     $l->anchorSet($item);
+		     if (_update_service_info($self, $cfg, 0, $l)) {
+		       _add_related_service($self,$cfg,$l)
+		     } else {
+		       $self->{config}{pml}->save();
+		     }
+		   }, $hlist],
+     );
+    $d->Subwidget('B_Add')->configure(
+      -command => [\&_add_related_service,$self,$cfgs,$hlist],
+     );
+    $d->Subwidget('B_Info')->configure(
+      -command => [sub {
+		     my $l = pop @_;
+		     my $cfg = $l->info('data',$l->info('anchor'));
+		     return unless $cfg;
+		     return _update_service_info($self,$cfg,1,$l);
+		   },$hlist],
+     );
+    $d->Subwidget('B_Edit')->configure(
+      -command => [sub {
+		     my $l = pop @_;
+		     my $id = $l->info('anchor');
+		     if ($id) {
+		       my $cfg = $l->info('data', $id);
+		       return unless $cfg;
+		       edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
+		       unless (_update_service_info($self, $cfg, 0, $l)) {
+			 $self->_add_cfg_item($l, $id, $cfg);
+			 $self->{config}{pml}->save();
+		       }
+		     }
+		   },$hlist]
+     );
+    $d->Subwidget('B_Remove')->configure(
+      -command => [sub {
+		     my $l = pop @_;
+		     my $id = $l->info('anchor');
+		     my $cfg = $l->info('data', $id);
+		     my $title = PMLInstance::get_data($cfg,'cached_description/title') || '';
+		     if ($id and
+			   $l->QuestionQuery(
+			     -title => 'Delete connection',
+			     -label => qq{Really delete connection $title ($id)?},
+			     -buttons => ['Delete','Cancel'],
+			    ) eq 'Delete') {
+		       my $next = $l->info('next' => $id) || $l->info('prev' => $id);
+		       $l->delete(entry => $id);
+		       $l->anchorSet($next) if $next;
+		       $cfgs->delete_value($cfg);
+		       $self->{config}{pml}->save();
+		     }
+		   },$hlist],
+     );
 
-    my @sel= $configuration ? (_cfg_label($configuration)) : @opts ? $opts[0] : ();
-    ListQuery('Select connection',
-			 'browse',
-			 \@opts,
-			 \@sel,
-	      {
-		label => { -text=> qq{Select from previously configured server connections\nor create a new one.} },
-		buttons => [
-		  {
-		    -text => 'New',
-		    -command => [sub {
-				   my $l = pop @_;
-				   my $cfg = Fslib::Struct->new();
-				   do {
-				     edit_config('Edit connection',$cfg,$cfg_type,'id',$l->toplevel) || return;
-				   } while (!$cfg->{id} or !PMLSchema::CDATA->check_string_format($cfg->{id},'ID'));
-				   $cfgs->push_element('http',$cfg);
-				   $l->insert('end',_cfg_label($cfg));
-				   $l->see('end');
-				   $l->selectionClear(0,'end');
-				   $l->activate('end');
-				   $l->selectionSet('end');
-				   if (_update_service_info($self, $cfg, 0, $l)) {
-				     _add_related_service($self,$cfg,$l)
-				   } else {
-				     $self->{config}{pml}->save();
-				   }
-				 }],
-		  },
-		  {
-		    -text => 'Get Info',
-		    -command => [sub {
-		  		   my $l = pop @_;
-				   my $label = $l->get('active');
-		  		   my $id = _cfg_id_from_label($label);
-		  		   return unless $id;
-		  		   my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
-		  		   return unless $cfg;
-				   return _update_service_info($self,$cfg,1,$l);
-		  		 }],
-		  },
-
-		  # {
-		  #   -text => 'Clone',
-		  #   -command => [sub {
-		  # 		   my $l = pop @_;
-		  # 		   my $id = _cfg_id_from_label($l->get('active'));
-		  # 		   return unless $id;
-		  # 		   my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
-		  # 		   return unless $cfg;
-		  # 		   $cfg = Fslib::CloneValue($cfg);
-		  # 		   $cfg->{id}=undef;
-		  # 		   edit_config('Edit connection',$cfg,$cfg_type,'id',$l->toplevel) || return;
-		  # 		   $cfgs->push_element('http',$cfg);
-		  # 		   $self->{config}{pml}->save();
-		  # 		   $l->insert('end',_cfg_label($cfg));
-		  # 		   $l->see('end');
-		  # 		   $l->selectionClear(0,'end');
-		  # 		   $l->activate('end');
-		  # 		   $l->selectionSet('end');
-		  # 		 }],
-		  # },
-		  {
-		    -text => 'Edit',
-		    -command => [sub {
-				   my $l = pop @_;
-				   my $label = $l->get('active');
-				   my $id = _cfg_id_from_label($label);
-				   if ($id) {
-				     my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
-				     edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
-				     _update_service_info($self, $cfg, 0, $l)
-				       or $self->{config}{pml}->save();
-				     my $new_label = _cfg_label($cfg);
-				     if ($label ne $new_label) {
-				       $l->insert('active',$new_label);
-				       $l->delete('active');
-				     }
-				   }
-				 }],
-		  },
-		  {
-		    -text => 'Remove',
-		    -command => [sub {
-				   my $l = pop @_;
-				   my $id = _cfg_id_from_label($l->get('active'));
-				   if ($id and
-					 $l->QuestionQuery(
-					   -title => 'Delete connection',
-					   -label => qq{Really delete connection '$id'?},
-					   -buttons => ['Delete','Cancel'],
-					  ) eq 'Delete') {
-				     $l->delete('active');
-				     my $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
-				     if ($cfg) {
-				       $cfgs->delete_value($cfg);
-				       $self->{config}{pml}->save();
-				     }
-				   }
-				 }],
-		  },
-		  {
-		    -text => 'Add Related',
-		    -command => [\&_add_related_service,$self,$cfgs],
-		  }
-		 ],
-	      }
-	     ) || return;
-    ($id) = @sel;
+    return unless $d->Show() eq 'Select';
+    $id = $hlist->info('anchor');
+    $d->destroy;
   }
-  $id = _cfg_id_from_label($id);
+  #   my @opts = map _cfg_label($_), @confs;
+  #   my @sel= $configuration ? (_cfg_label($configuration)) : @opts ? $opts[0] : ();
+
+  #   undef @confs;
+
+  #   ListQuery('Select connection',
+  # 			 'browse',
+  # 			 \@opts,
+  # 			 \@sel,
+  # 	      {
+  # 		label => { -text=> qq{Select from previously configured server connections\nor create a new one.} },
+  # 		buttons => [
+  # 		 ],
+  # 	      }
+  # 	     ) || return;
+  #   ($id) = @sel;
+  # }
+  # $id = _cfg_id_from_label($id);
+
   return unless $id;
   my $cfg;
 #   if ($id eq ' CREATE NEW CONNECTION ') {
@@ -736,9 +730,54 @@ sub init {
   $self->check_server_version;
 }
 
+sub _add_cfg_items_to_hlist {
+  my ($self, $hlist, $confs, $anchor)=@_;
+  for my $c (@$confs) {
+    $self->_add_cfg_item($hlist, $c->{id}, $c);
+  }
+  if ($anchor and $hlist->info('exists',$anchor)) {
+    $hlist->anchorSet($anchor);
+  } elsif (@$confs) {
+    $hlist->anchorSet($confs->[0]->{id});
+  }
+}
+
+sub _add_cfg_item {
+  my ($self, $hlist, $item, $cfg)=@_;
+  my @cols = map PMLInstance::get_data($cfg,$_),
+    qw(id cached_description/title url);
+  my $exists = $hlist->info('exists',$item);
+  if ($item ne $cfg->{id}) {
+    if ($exists and $hlist->info('exists',$cfg->{id})) {
+      $hlist->delete(entry => $item);
+      $item = $cfg->{id};
+      $hlist->anchorSet($item);
+    } elsif ($exists) {
+      $hlist->add($cfg->{id}, -data => $cfg, -after => $item);
+      $hlist->delete(entry => $item);
+      $item = $cfg->{id};
+      $hlist->anchorSet($item);
+      $exists = 0;
+    }
+  } elsif ($exists) {
+    $hlist->entryconfigure($item, -data => $cfg);
+  } else {
+    $hlist->add($item, -data => $cfg);
+  }
+  if ($exists) {
+    for my $i (0..$#cols) {
+      $hlist->itemConfigure($item, $i, -text => $cols[$i]);
+    }
+  } else {
+    for my $i (0..$#cols) {
+      $hlist->itemCreate($item, $i, -text => $cols[$i]);
+    }
+  }
+}
+
 sub _update_service_info {
   my ($self, $cfg, $show, $l) = @_;
-  my $label = $l->get('active');
+  my $anchor = $l->info('anchor');
   my $res = _request($cfg,'about',
 		     [ client_version=>$VERSION,
 		       format=>'text',
@@ -746,7 +785,7 @@ sub _update_service_info {
   my $v = $res->is_success ? $res->content : undef;
   unless ($v) {
     ErrorMessage("Failed to connect to server to retrieve basic information about the treebank.\nThe server is incompatible or down!\n".$res->status_line."\n");
-    _show_service_info($self,$cfg,$l->toplevel) if $show;
+    _show_service_info($self,$cfg,$l->toplevel) if $show and ref($cfg->{cached_description});
     return;
   }
   $v=~s/\n.*//;
@@ -755,15 +794,16 @@ sub _update_service_info {
     $cfg->{url} = $s{service};
     _update_cached_info($self,$cfg, \%s);
     $self->{config}{pml}->save();
-    my $new_label = _cfg_label($cfg);
-    if ($label ne $new_label) {
-      $l->insert('active',$new_label);
-      $l->delete('active');
+    if ($anchor) {
+      # update info
+      $self->_add_cfg_item($l,$anchor,$cfg);
     }
+    _show_service_info($self,$cfg,$l->toplevel) if $show;
+    return 1;
   }
-  _show_service_info($self,$cfg,$l->toplevel) if $show;
-  return 1;
+  return;
 }
+
 
 sub _update_cached_info {
   my ($self,$cfg,$service_info)=@_;
@@ -820,18 +860,17 @@ sub _show_service_info {
 sub _add_related_service {
   my $l = pop @_;
   my ($self,$cfgs) = @_;
-  my $id = _cfg_id_from_label($l->get('active'));
+  my $id = $l->info('anchor');
   return unless $id;
   my %enabled;
-  my $cfg;
+  my $cfg = $l->info('data',$id);
+  return unless $cfg;
+
   my %ids;
   for my $c (map $_->value, grep $_->name eq 'http', SeqV($cfgs)) {
     $ids{$c->{id}} = 1;
     $enabled{$c->{url}} = 1 if $c->{url};
-    $cfg = $c if $c->{id} eq $id;
   }
-  return unless $cfg;
-
   my $res = _request($cfg,'other',
 	   [ client_version=>$VERSION,
 	     format=>'text',
@@ -854,8 +893,6 @@ sub _add_related_service {
     my $d = $l->toplevel->DialogBox(-title => 'Select service',
 				    -buttons => [qw[OK Cancel]],
 				   );
-    $d->BindEscape();
-    $d->BindReturn($d,1);
     my $f0 = $d->add('Frame',
 		     -relief=>'sunken',
 		     -borderwidth=>2,
@@ -915,7 +952,6 @@ sub _add_related_service {
       }
       $f->pack(-expand=>1, -fill=>'both', -padx => 0, -pady=>0.5);
     }
-    $pane->BindMouseWheelVert('',$pane);
     foreach my $i (0..$#b) {
       my $b = $b[$i];
       $b->bind('<Down>',[sub { shift; $pane->see($_[0]->parent), $_[0]->focus},$b[$i+1]]) if ($i<$#b);
@@ -947,6 +983,9 @@ sub _add_related_service {
     }
     $b[0]->focus;
     $d->BindButtons;
+    $d->BindEscape();
+    $d->BindReturn($d,1);
+    $pane->BindMouseWheelVert('',$pane);
     return if $d->Show ne 'OK';
 
     foreach my $c (map $_->value, grep $_->name eq 'http', SeqV($cfgs)) {
@@ -985,10 +1024,9 @@ sub _add_related_service {
       }
     }
   $self->{config}{pml}->save();
-  $l->delete(0,'end');
-  for my $c (map $_->value, grep $_->name eq 'http', SeqV($cfgs)) {
-    $l->insert('end',_cfg_label($c));
-  }
+
+  $l->delete('all');
+  $self->_add_cfg_items_to_hlist($l, [map $_->value, grep $_->name eq 'http', SeqV($cfgs)],$id);
   return 1;
 }
 
@@ -1070,7 +1108,7 @@ sub idx_to_pos {
       }
       my $f = $res->content;
       $f=~s/\r?\n$//;
-      print "$f\n";
+      print STDERR "$f\n";
       push @res, $f;
     } else {
       push @res, undef;
@@ -1089,13 +1127,21 @@ sub load_config_file {
     } else {
       $config_file ||= FindInResources('treebase.conf');
       if (-f $config_file) {
-	$self->{config}{pml} = PMLInstance->load({ filename=>$config_file });
+	# we need this extension's resource paths precede TrEd's resource paths
+	# since old versions of TrEd include old version of treebase_conf_schema.xml
+	my @paths = Fslib::ResourcePaths();
+	eval {
+	  Fslib::AddResourcePathAsFirst(CallerDir(File::Spec->catdir('..','resources')));
+	  $self->{config}{pml} = PMLInstance->load({ filename=>$config_file });
+	};
+	Fslib::SetResourcePaths(@paths);
+	die $@ if $@;
       } else {
 	my $tred_d = File::Spec->catfile($ENV{HOME},'.tred.d');
 	mkdir $tred_d unless -d $tred_d;
 	$config_file = File::Spec->catfile($tred_d,'treebase.conf');
 	$self->{config}{pml} = PMLInstance->load({ string => $DEFAULTS{pmltq_config},
-					      filename=> $config_file});
+						   filename=> $config_file});
 	$self->{config}{pml}->save();
       }
     }
@@ -1119,7 +1165,7 @@ my ($userlogin) = (getlogin() || ($^O ne 'MSWin32') && getpwuid($<) || 'unknown'
 $DEFAULTS{pmltq_config} = <<"EOF";
 <pmltq_config xmlns="http://ufal.mff.cuni.cz/pdt/pml/">
   <head>
-    <schema href="treebase_conf_schema.xml"/>
+    <schema href="pmltq_conf_schema.xml"/>
   </head>
   <limit>$DEFAULTS{limit}</limit>
   <row_limit>$DEFAULTS{row_limit}</row_limit>
