@@ -489,6 +489,11 @@ sub edit_config {
   my ($title,$data,$type,$focus,$top)=@_;
   $top ||= ToplevelFrame();
   $top->TrEdNodeEditDlg({
+    enable_callback => sub {
+      my ($path)=@_;
+      return 0 if $path =~ m{^/?cached_|^/?id$};
+      return 1;
+    },
     title => $title,
     type => $type,
     object => $data,
@@ -592,17 +597,29 @@ sub init {
   if (GUI() and !$id) {
     require Tk::QueryDialog;
     my @confs = (map $_->value, grep $_->name eq 'http', SeqV($cfgs));
+
     unless (@confs) {
       my $cfg = Fslib::Struct->new();
-      edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
+      $cfg->{id} = $self->_new_cfg_id($cfgs);
+      edit_config('Edit connection',$cfg,$cfg_type,'url') || return;
       $cfgs->push_element('http',$cfg);
-      $self->{config}{pml}->save();
       push @confs, $cfg;
+      if (_update_service_info($self, $cfg, 0, undef)) {
+	if (_add_related_service($self,$cfgs,$cfg,undef)) {
+	  @confs = (map $_->value, grep $_->name eq 'http', SeqV($cfgs));
+	}
+      } else {
+	$self->{config}{pml}->save();
+      }
     }
+
     my $d=ToplevelFrame()->DialogBox(
       -title => 'Select Connection',
       -buttons => [qw(Select New Add Info Edit Remove Close)],
     );
+    $d->add('Label',
+	    -text => 'Select, create, or modify connections to PML-TQ servers:',
+	   )->pack(-expand => 1, -fill => 'x', -pady => 10);
     my $hlist = $d->Scrolled(
       'HList',
       -scrollbars => 'osoe',
@@ -614,28 +631,56 @@ sub init {
     )->pack(-expand =>1, -fill => 'both');
     eval { $d->configure(-focus => $hlist); };
     $self->_add_cfg_items_to_hlist($hlist, \@confs, $configuration && $configuration->{id});
+    $hlist->bind('<Alt-KeyPress>',sub{});
+    $hlist->bind('<Meta-KeyPress>',sub{});
+    $hlist->bind('<Control-KeyPress>',sub{});
+    $hlist->bind(
+      '<KeyPress>',
+      [sub{
+	my ($hlist,$K) = @_;
+	return unless $K=~/^[a-z]$/i;
+	my $anchor = $hlist->info('anchor') || return;
+	my $id = $hlist->info(next => $anchor);
+	for (0,1) {
+	  while ($id and $id ne $anchor) {
+	    return unless $id;
+	    if ($id=~/^\Q$K/) {
+	      $hlist->see($id);
+	      $hlist->selectionClear();
+	      $hlist->selectionSet($id);
+	      $hlist->anchorSet($id);
+	      Tk->break;
+	      return;
+	    }
+	    $id = $hlist->info(next => $id);
+	  }
+	  ($id) = $hlist->info('children');
+	}
+	Tk->break;
+	return;
+      },Tk::Ev("K")],
+    );
     $d->BindEscape();
     $d->BindButtons();
     $d->Subwidget('B_New')->configure(
       -command => [sub {
 		     my $l = pop @_;
 		     my $cfg = Fslib::Struct->new();
-		     do {
-		       edit_config('Edit connection',$cfg,$cfg_type,'id',$l->toplevel) || return;
-		     } while (!$cfg->{id} or !PMLSchema::CDATA->check_string_format($cfg->{id},'ID'));
+		     $cfg->{id} = $self->_new_cfg_id($cfgs);
+		     edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
 		     $cfgs->push_element('http',$cfg);
-		     my $item = $l->add($cfg->{id}, -data => $cfg);
-		     $l->see($item);
-		     $l->anchorSet($item);
+		     $self->_add_cfg_item($l, $id, $cfg);
+		     $l->see($id);
+		     $l->anchorSet($id);
 		     if (_update_service_info($self, $cfg, 0, $l)) {
-		       _add_related_service($self,$cfg,$l)
+		       _add_related_service($self,$cfgs,$cfg,$l)
 		     } else {
 		       $self->{config}{pml}->save();
 		     }
 		   }, $hlist],
      );
     $d->Subwidget('B_Add')->configure(
-      -command => [\&_add_related_service,$self,$cfgs,$hlist],
+      -command => [\&_add_related_service,$self,$cfgs,undef,$hlist],
      );
     $d->Subwidget('B_Info')->configure(
       -command => [sub {
@@ -653,7 +698,9 @@ sub init {
 		       my $cfg = $l->info('data', $id);
 		       return unless $cfg;
 		       edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
-		       unless (_update_service_info($self, $cfg, 0, $l)) {
+		       if (_update_service_info($self, $cfg, 0, $l)) {
+			 _add_related_service($self,$cfgs,$cfg,$l);
+		       } else {
 			 $self->_add_cfg_item($l, $id, $cfg);
 			 $self->{config}{pml}->save();
 		       }
@@ -668,10 +715,10 @@ sub init {
 		     my $title = PMLInstance::get_data($cfg,'cached_description/title') || '';
 		     if ($id and
 			   $l->QuestionQuery(
-			     -title => 'Delete connection',
-			     -label => qq{Really delete connection $title ($id)?},
-			     -buttons => ['Delete','Cancel'],
-			    ) eq 'Delete') {
+			     -title => 'Remove connection',
+			     -label => qq{Really remove connection $title ($id)?},
+			     -buttons => ['Remove','Cancel'],
+			    ) eq 'Remove') {
 		       my $next = $l->info('next' => $id) || $l->info('prev' => $id);
 		       $l->delete(entry => $id);
 		       $l->anchorSet($next) if $next;
@@ -680,7 +727,6 @@ sub init {
 		     }
 		   },$hlist],
      );
-
     return unless $d->Show() eq 'Select';
     $id = $hlist->info('anchor');
     $d->destroy;
@@ -777,7 +823,8 @@ sub _add_cfg_item {
 
 sub _update_service_info {
   my ($self, $cfg, $show, $l) = @_;
-  my $anchor = $l->info('anchor');
+  my $top = $l ? $l->toplevel : ToplevelFrame();
+  my $anchor = $l && $l->info('anchor');
   my $res = _request($cfg,'about',
 		     [ client_version=>$VERSION,
 		       format=>'text',
@@ -785,7 +832,7 @@ sub _update_service_info {
   my $v = $res->is_success ? $res->content : undef;
   unless ($v) {
     ErrorMessage("Failed to connect to server to retrieve basic information about the treebank.\nThe server is incompatible or down!\n".$res->status_line."\n");
-    _show_service_info($self,$cfg,$l->toplevel) if $show and ref($cfg->{cached_description});
+    _show_service_info($self,$cfg,$top) if $show and ref($cfg->{cached_description});
     return;
   }
   $v=~s/\n.*//;
@@ -798,7 +845,7 @@ sub _update_service_info {
       # update info
       $self->_add_cfg_item($l,$anchor,$cfg);
     }
-    _show_service_info($self,$cfg,$l->toplevel) if $show;
+    _show_service_info($self,$cfg,$top) if $show;
     return 1;
   }
   return;
@@ -817,8 +864,6 @@ sub _show_service_info {
   my $d = $widget->toplevel->DialogBox(-title => 'Information About PML-TQ Search Service',
 				       -buttons => [qw[OK]],
 				      );
-  $d->BindEscape();
-  $d->BindReturn($d,1);
   my $f = $d->add('Frame',
 		   -relief=>'sunken',
 		   -borderwidth=>2,
@@ -855,20 +900,22 @@ sub _show_service_info {
     $link->bind($link,'<1>',[sub { \&main::open_url_in_browser($_[1]) },$s->{moreinfo}]);
     $link->pack(-fill=>'x', -padx => 3);
   }
+  $d->BindEscape();
   $d->Show;
 }
 sub _add_related_service {
   my $l = pop @_;
-  my ($self,$cfgs) = @_;
-  my $id = $l->info('anchor');
-  return unless $id;
+  my ($self,$cfgs,$cfg) = @_;
+  my $id;
+  if ($cfg) {
+    $id = $cfg->{id};
+  } else {
+    $id = $l->info('anchor');
+    $cfg = defined($id) && $l->info('data',$id);
+  }
+  return unless $cfg and $id;
   my %enabled;
-  my $cfg = $l->info('data',$id);
-  return unless $cfg;
-
-  my %ids;
   for my $c (map $_->value, grep $_->name eq 'http', SeqV($cfgs)) {
-    $ids{$c->{id}} = 1;
     $enabled{$c->{url}} = 1 if $c->{url};
   }
   my $res = _request($cfg,'other',
@@ -883,152 +930,168 @@ sub _add_related_service {
   return unless $v;
   my @services;
   my %services;
-    for my $service (split /\n/,$v) {
-      my %s = map { split(':',$_,2) } split /\t/,$service;
-      if ($s{service}) {
-	push @services, ($services{$s{service}}=\%s);
-      }
+  for my $service (split /\n/,$v) {
+    my %s = map { split(':',$_,2) } split /\t/,$service;
+    if ($s{service}) {
+      push @services, ($services{$s{service}}=\%s);
     }
-    return unless @services;
-    my $d = $l->toplevel->DialogBox(-title => 'Select service',
-				    -buttons => [qw[OK Cancel]],
-				   );
-    my $f0 = $d->add('Frame',
-		     -relief=>'sunken',
-		     -borderwidth=>2,
-		    )->pack(-expand=>1, -fill =>'both', -padx=>7, -pady=>7 );
-    my $pane = $f0->Scrolled(
-      'Pane',
-      -borderwidth=>0,
-      -background=>'#cccccc',
-      -scrollbars => 'oe',
-      -width=> '610p',
-      -height=> '500',
-      -sticky=>'we')->pack(-expand=>1, -fill =>'both');
-    my @b;
-    my $highlight_color = '#959ca5';
-    my $background = 'white';
-    my %is_link;
+  }
+  return unless @services;
+  my $top = $l ? $l->toplevel : ToplevelFrame();
+  my $d = $top->DialogBox(-title => 'Select service',
+			  -buttons => [qw[OK Cancel]],
+			 );
+  my $f0 = $d->add('Frame',
+		   -relief=>'sunken',
+		   -borderwidth=>2,
+		  )->pack(-expand=>1, -fill =>'both', -padx=>7, -pady=>7 );
+  my $pane = $f0->Scrolled(
+    'Pane',
+    -borderwidth=>0,
+    -background=>'#cccccc',
+    -scrollbars => 'oe',
+    -width=> '610p',
+    -height=> '500',
+    -sticky=>'we')->pack(-expand=>1, -fill =>'both');
+  my @b;
+  my $highlight_color = '#959ca5';
+  my $background = 'white';
+  my %is_link;
 
-    foreach my $s (@services) {
-      my $f = $pane->Frame(-background=>$background,
-			   -borderwidth=>1,
-			   -relief=>'flat',
-			   -takefocus=>0,
-			   );
-      $f->bindtags([$f,ref($f),$f->toplevel,'all']);
-      my $b = $f->Checkbutton(
-	-variable=>\$enabled{$s->{service}},
-	-highlightthickness => 1,
+  foreach my $s (@services) {
+    my $f = $pane->Frame(-background=>$background,
+			 -borderwidth=>1,
+			 -relief=>'flat',
+			 -takefocus=>0,
+			);
+    $f->bindtags([$f,ref($f),$f->toplevel,'all']);
+    my $b = $f->Checkbutton(
+      -variable=>\$enabled{$s->{service}},
+      -highlightthickness => 1,
 	-highlightcolor => $highlight_color,
-	-activebackground => $background,
-	-borderwidth=>2,
-	-background=>$background,
-	-text=>$s->{title},
-	-wraplength=>'500p',
-	-font=>'C_bold',
-	-anchor=>'nw',
-	-takefocus=>1,
-	-justify=>'left')->pack(-fill=>'x', -padx => 3);
-      $b->bindtags([$b,ref($b),$b->toplevel,'all']);
-      push @b,$b;
-      if ($s->{abstract}) {
-	$f->Label(-background=>$background,
-		  -text=>$s->{abstract}, -wraplength=>'500p',
-		  -font=>'C_normal',
-		  -foreground=>'black',
-		  -anchor=>'nw',
-		  -justify=>'left')->pack(-fill=>'x', -padx => 3);
-      }
-      if ($s->{moreinfo}) {
-	my $link = $f->Label(-background=>$background,
-			     -text=>$s->{moreinfo}, -font => 'C_small',
-			     -foreground=>'blue',
-			     -anchor=>'ne',
-			     -justify=>'right');
-	$is_link{$link}=1;
-	$link->bind($link,'<1>',[sub { \&main::open_url_in_browser($_[1]) },$s->{moreinfo}]);
-	$link->pack(-fill=>'x', -padx => 3);
-      }
-      $f->pack(-expand=>1, -fill=>'both', -padx => 0, -pady=>0.5);
+      -activebackground => $background,
+      -borderwidth=>2,
+      -background=>$background,
+      -text=>$s->{title},
+      -wraplength=>'500p',
+      -font=>'C_bold',
+      -anchor=>'nw',
+      -takefocus=>1,
+      -justify=>'left')->pack(-fill=>'x', -padx => 3);
+    $b->bindtags([$b,ref($b),$b->toplevel,'all']);
+    push @b,$b;
+    if ($s->{abstract}) {
+      $f->Label(-background=>$background,
+		-text=>$s->{abstract}, -wraplength=>'500p',
+		-font=>'C_normal',
+		-foreground=>'black',
+		-anchor=>'nw',
+		-justify=>'left')->pack(-fill=>'x', -padx => 3);
     }
-    foreach my $i (0..$#b) {
-      my $b = $b[$i];
-      $b->bind('<Down>',[sub { shift; $pane->see($_[0]->parent), $_[0]->focus},$b[$i+1]]) if ($i<$#b);
-      $b->bind('<Up>',[sub {shift; $pane->see($_[0]->parent), $_[0]->focus},$b[$i-1]]) if ($i>0);
-      for my $w ($b->parent,$b->parent->children) {
-	$pane->BindMouseWheelVert('',$w);
-	$w->bind('<1>',[$b,'focus']) unless $is_link{$w};
-      }
-      $b->bind('<FocusIn>',
-		   sub {
-		     for my $w ($_[0]->parent,$_[0]->parent->children) {
-		       $w->configure(-background=>$highlight_color);
-		       eval { $w->configure(-activebackground=>$highlight_color, -activeforeground=>'white'); };
-		       if (eval{$w->cget('-foreground') eq 'black'}) {
-			 $w->configure(-foreground => 'white')
-		       }
-		     }
-		   });
-      $b->bind('<FocusOut>',
-		   sub {
-		     for my $w ($_[0]->parent,$_[0]->parent->children) {
-		       $w->configure(-background=>$background);
-		       eval { $w->configure(-activebackground=>$background,  -activeforeground=>'black'); };
-		       if (eval{$w->cget('-foreground') eq 'white'}) {
-			 $w->configure(-foreground => 'black');
-		       }
-		     }
-		   });
+    if ($s->{moreinfo}) {
+      my $link = $f->Label(-background=>$background,
+			   -text=>$s->{moreinfo}, -font => 'C_small',
+			   -foreground=>'blue',
+			   -anchor=>'ne',
+			   -justify=>'right');
+      $is_link{$link}=1;
+      $link->bind($link,'<1>',[sub { \&main::open_url_in_browser($_[1]) },$s->{moreinfo}]);
+      $link->pack(-fill=>'x', -padx => 3);
     }
-    $b[0]->focus;
-    $d->BindButtons;
-    $d->BindEscape();
-    $d->BindReturn($d,1);
-    $pane->BindMouseWheelVert('',$pane);
-    return if $d->Show ne 'OK';
+    $f->pack(-expand=>1, -fill=>'both', -padx => 0, -pady=>0.5);
+  }
+  foreach my $i (0..$#b) {
+    my $b = $b[$i];
+    $b->bind($b,'<Control-Return>',sub{$d->{selected_button}='OK'; Tk->break});
+    $b->bind('<Down>',[sub { shift; $pane->see($_[0]->parent), $_[0]->focus},$b[$i+1]]) if ($i<$#b);
+    $b->bind('<Up>',[sub {shift; $pane->see($_[0]->parent), $_[0]->focus},$b[$i-1]]) if ($i>0);
+    for my $w ($b->parent,$b->parent->children) {
+      $pane->BindMouseWheelVert('',$w);
+      $w->bind('<1>',[$b,'focus']) unless $is_link{$w};
+    }
+    $b->bind('<FocusIn>',
+	     sub {
+	       for my $w ($_[0]->parent,$_[0]->parent->children) {
+		 $w->configure(-background=>$highlight_color);
+		 eval { $w->configure(-activebackground=>$highlight_color, -activeforeground=>'white'); };
+		 if (eval{$w->cget('-foreground') eq 'black'}) {
+		   $w->configure(-foreground => 'white')
+		 }
+	       }
+	     });
+    $b->bind('<FocusOut>',
+	     sub {
+	       for my $w ($_[0]->parent,$_[0]->parent->children) {
+		 $w->configure(-background=>$background);
+		 eval { $w->configure(-activebackground=>$background,  -activeforeground=>'black'); };
+		 if (eval{$w->cget('-foreground') eq 'white'}) {
+		   $w->configure(-foreground => 'black');
+		 }
+	       }
+	     });
+  }
+  $b[0]->focus;
+  $d->BindButtons;
+  $d->BindEscape();
+  $d->BindReturn($d,1);
+  $pane->BindMouseWheelVert('',$pane);
+  return if $d->Show ne 'OK';
 
-    foreach my $c (map $_->value, grep $_->name eq 'http', SeqV($cfgs)) {
-      my $url = $c->{url};
-      if (!$url) {
-	# prune broken entries
-	delete $ids{$c->{id}};
+  foreach my $c (map $_->value, grep $_->name eq 'http', SeqV($cfgs)) {
+    my $url = $c->{url};
+    if (!$url) {
+      # prune broken entries
+      $cfgs->delete_value($c);
+    } elsif (exists($enabled{$url})) {
+      if ($enabled{$url}) {
+	delete $enabled{$url};
+	# update cached values:
+	_update_cached_info($self,$c, $services{$url}) if $services{$url};
+      } else {
 	$cfgs->delete_value($c);
-      } elsif (exists($enabled{$url})) {
-	if ($enabled{$url}) {
-	  delete $enabled{$url};
-	  # update cached values:
-	  _update_cached_info($self,$c, $services{$url}) if $services{$url};
-	} else {
-	  delete $ids{$c->{id}};
-	  $cfgs->delete_value($c);
-	}
       }
     }
-    foreach my $s (@services) {
-      if ($enabled{$s->{service}}) {
-	my $new_id = $s->{id} || 'service';
-	if (exists $ids{$new_id}) {
-	  my $i = 1;
-	  $i++ while exists $ids{$new_id.'-'.$i};
-	  $new_id .= '-'.$i;
-	}
-	my $c = Fslib::Struct->new({
-	  id => $new_id,
-	  url => $s->{service},
-	  username => $cfg->{username},
-	  password => $cfg->{password},
-	 },1);
-	$cfgs->push_element('http',$c);
-	_update_cached_info($self,$c, $s);
-      }
+  }
+  my $ids_ref;
+  foreach my $s (@services) {
+    if ($enabled{$s->{service}}) {
+      my $new_id;
+      ($new_id,$ids_ref) = $self->_new_cfg_id($cfgs,undef,$ids_ref);
+      my $c = Fslib::Struct->new({
+	id => $new_id,
+	url => $s->{service},
+	username => $cfg->{username},
+	password => $cfg->{password},
+      },1);
+      $cfgs->push_element('http',$c);
+      _update_cached_info($self,$c, $s);
     }
+  }
   $self->{config}{pml}->save();
-
-  $l->delete('all');
-  $self->_add_cfg_items_to_hlist($l, [map $_->value, grep $_->name eq 'http', SeqV($cfgs)],$id);
+  if ($l) {
+    $l->delete('all');
+    $self->_add_cfg_items_to_hlist($l, [map $_->value, grep $_->name eq 'http', SeqV($cfgs)],$id);
+  }
   return 1;
+
 }
+
+sub _new_cfg_id {
+  my ($self,$cfgs,$new_id,$ids_ref)=@_;
+
+  unless (defined $ids_ref) {
+    $ids_ref={
+      map { $_->{id} => 1 } map $_->value, SeqV($cfgs)
+    };
+  }
+  if (!$new_id or exists $ids_ref->{$new_id}) {
+    $new_id = 'a';
+    $new_id++ while exists $ids_ref->{$new_id};
+    $ids_ref->{$new_id}=1;
+  }
+  return wantarray ? ($new_id,$ids_ref) : $new_id;
+}
+
 
 sub prepare_results {
   my ($self,$dir)=@_;
@@ -1165,7 +1228,7 @@ my ($userlogin) = (getlogin() || ($^O ne 'MSWin32') && getpwuid($<) || 'unknown'
 $DEFAULTS{pmltq_config} = <<"EOF";
 <pmltq_config xmlns="http://ufal.mff.cuni.cz/pdt/pml/">
   <head>
-    <schema href="pmltq_conf_schema.xml"/>
+    <schema href="treebase_conf_schema.xml"/>
   </head>
   <limit>$DEFAULTS{limit}</limit>
   <row_limit>$DEFAULTS{row_limit}</row_limit>
