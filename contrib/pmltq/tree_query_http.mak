@@ -110,8 +110,9 @@ sub identify {
   if ($self->{config}{data}) {
     my $cfg = $self->{config}{data};
     $ident.=' ';
-    if ($cfg->{id}) {
-      $ident.=$cfg->{id};
+    my $title = PMLInstance::get_data($cfg,'cached_description/title');
+    if ($title) {
+      $ident.=$title;
     } else {
       $ident.=$cfg->{username}.'@' if $cfg->{username};
       $ident.=$cfg->{url};
@@ -615,7 +616,7 @@ sub init {
 
     my $d=ToplevelFrame()->DialogBox(
       -title => 'Select Connection',
-      -buttons => [qw(Select New Add Info Edit Remove Close)],
+      -buttons => ['Select', 'Add Service', 'New URL', 'Info', 'Edit', 'Remove', 'Close'],
     );
     $d->add('Label',
 	    -text => 'Select, create, or modify connections to PML-TQ servers:',
@@ -662,37 +663,30 @@ sub init {
     );
     $d->BindEscape();
     $d->BindButtons();
-    $d->Subwidget('B_New')->configure(
+    $d->Subwidget('B_Add Service')->configure(
       -command => [sub {
-		     my $l = pop @_;
-		     my $cfg = Fslib::Struct->new();
-		     $cfg->{id} = $self->_new_cfg_id($cfgs);
-		     edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
-		     $cfgs->push_element('http',$cfg);
-		     $self->_add_cfg_item($l, $id, $cfg);
-		     $l->see($id);
-		     $l->anchorSet($id);
-		     if (_update_service_info($self, $cfg, 0, $l)) {
-		       _add_related_service($self,$cfgs,$cfg,$l)
+		     my ($self,$cfgs,$cfg_type,$hlist)=@_;
+		     if ($hlist->info('anchor')) {
+		       _add_related_service($self,$cfgs,undef,$hlist);
 		     } else {
-		       $self->{config}{pml}->save();
+		       _new_service_url($self, $cfgs, $cfg_type, $hlist);
 		     }
-		   }, $hlist],
+		   },$self,$cfgs,$cfg_type, $hlist],
      );
-    $d->Subwidget('B_Add')->configure(
-      -command => [\&_add_related_service,$self,$cfgs,undef,$hlist],
+    $d->Subwidget('B_New URL')->configure(
+      -command => [\&_new_service_url, $self, $cfgs, $cfg_type, $hlist],
      );
     $d->Subwidget('B_Info')->configure(
       -command => [sub {
-		     my $l = pop @_;
+		     my ($self,$l) = @_;
 		     my $cfg = $l->info('data',$l->info('anchor'));
 		     return unless $cfg;
 		     return _update_service_info($self,$cfg,1,$l);
-		   },$hlist],
+		   },$self, $hlist],
      );
     $d->Subwidget('B_Edit')->configure(
       -command => [sub {
-		     my $l = pop @_;
+		     my ($self,$cfgs,$cfg_type,$l) = @_;
 		     my $id = $l->info('anchor');
 		     if ($id) {
 		       my $cfg = $l->info('data', $id);
@@ -705,11 +699,11 @@ sub init {
 			 $self->{config}{pml}->save();
 		       }
 		     }
-		   },$hlist]
+		   },$self,$cfgs,$cfg_type,$hlist]
      );
     $d->Subwidget('B_Remove')->configure(
       -command => [sub {
-		     my $l = pop @_;
+		     my ($self,$cfgs,$l) = @_;
 		     my $id = $l->info('anchor');
 		     my $cfg = $l->info('data', $id);
 		     my $title = PMLInstance::get_data($cfg,'cached_description/title') || '';
@@ -725,43 +719,18 @@ sub init {
 		       $cfgs->delete_value($cfg);
 		       $self->{config}{pml}->save();
 		     }
-		   },$hlist],
+		   },$self, $cfgs, $hlist],
      );
     return unless $d->Show() eq 'Select';
     $id = $hlist->info('anchor');
     $d->destroy;
   }
-  #   my @opts = map _cfg_label($_), @confs;
-  #   my @sel= $configuration ? (_cfg_label($configuration)) : @opts ? $opts[0] : ();
-
-  #   undef @confs;
-
-  #   ListQuery('Select connection',
-  # 			 'browse',
-  # 			 \@opts,
-  # 			 \@sel,
-  # 	      {
-  # 		label => { -text=> qq{Select from previously configured server connections\nor create a new one.} },
-  # 		buttons => [
-  # 		 ],
-  # 	      }
-  # 	     ) || return;
-  #   ($id) = @sel;
-  # }
-  # $id = _cfg_id_from_label($id);
 
   return unless $id;
   my $cfg;
-#   if ($id eq ' CREATE NEW CONNECTION ') {
-#     $cfg = Fslib::Struct->new();
-#     GUI() && edit_config('Edit connection',$cfg,$cfg_type,'id') || return;
-#     $cfgs->push_element('http',$cfg);
-#     $self->{config}{pml}->save();
-#     $id = $cfg->{id};
-#   } else {
-    $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
-    die "Didn't find configuration '$id'" unless $cfg;
-#  }
+
+  $cfg = first { $_->{id} eq $id } map $_->value, grep $_->name eq 'http', SeqV($cfgs);
+  die "Didn't find configuration '$id'" unless $cfg;
   $self->{config}{id} = $id;
   unless (defined $cfg->{url}) {
     if (GUI()) {
@@ -774,6 +743,23 @@ sub init {
   $self->{config}{data} = $cfg;
   $self->{spinbox_timeout}=int($self->{config}{pml}->get_root->get_member('timeout')) || $DEFAULTS{timeout};
   $self->check_server_version;
+}
+
+sub _new_service_url {
+  my ($self,$cfgs,$cfg_type,$l)=@_;
+  my $cfg = Fslib::Struct->new();
+  $cfg->{id} = $self->_new_cfg_id($cfgs);
+  edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
+  $cfgs->push_element('http',$cfg);
+  my $id = $cfg->{id};
+  $self->_add_cfg_item($l, $id, $cfg);
+  $l->see($id);
+  $l->anchorSet($id);
+  if (_update_service_info($self, $cfg, 0, $l)) {
+    _add_related_service($self,$cfgs,$cfg,$l)
+  } else {
+    $self->{config}{pml}->save();
+  }
 }
 
 sub _add_cfg_items_to_hlist {
@@ -831,7 +817,7 @@ sub _update_service_info {
 		      ]);
   my $v = $res->is_success ? $res->content : undef;
   unless ($v) {
-    ErrorMessage("Failed to connect to server to retrieve basic information about the treebank.\nThe server is incompatible or down!\n".$res->status_line."\n");
+    ErrorMessage("Failed to connect to server to retrieve basic information about the treebank:\n\n".$res->status_line."\n");
     _show_service_info($self,$cfg,$top) if $show and ref($cfg->{cached_description});
     return;
   }
@@ -923,7 +909,7 @@ sub _add_related_service {
 	     format=>'text',
 	   ]);
   unless ($res->is_success) {
-    ErrorMessage("Failed to connect to server (the server is incompatible or down)!\n".$res->status_line."\n");
+    ErrorMessage("Failed to connect to server:\n\n".$res->status_line."\n");
     return;
   }
   my $v = $res->content;
@@ -934,6 +920,10 @@ sub _add_related_service {
     my %s = map { split(':',$_,2) } split /\t/,$service;
     if ($s{service}) {
       push @services, ($services{$s{service}}=\%s);
+      if (exists $s{access}) {
+	# deselect servers the user is not authorized to connect to
+	$enabled{$s{service}}=0 if $s{access}==0;
+      }
     }
   }
   return unless @services;
@@ -966,7 +956,8 @@ sub _add_related_service {
 			);
     $f->bindtags([$f,ref($f),$f->toplevel,'all']);
     my $b = $f->Checkbutton(
-      -variable=>\$enabled{$s->{service}},
+      -variable => \$enabled{$s->{service}},
+      -state => ((exists($s->{access}) and $s->{access}==0) ? 'disabled' : 'normal'),
       -highlightthickness => 1,
 	-highlightcolor => $highlight_color,
       -activebackground => $background,
@@ -1003,8 +994,42 @@ sub _add_related_service {
   foreach my $i (0..$#b) {
     my $b = $b[$i];
     $b->bind($b,'<Control-Return>',sub{$d->{selected_button}='OK'; Tk->break});
-    $b->bind('<Down>',[sub { shift; $pane->see($_[0]->parent), $_[0]->focus},$b[$i+1]]) if ($i<$#b);
-    $b->bind('<Up>',[sub {shift; $pane->see($_[0]->parent), $_[0]->focus},$b[$i-1]]) if ($i>0);
+    $b->bind('<Down>',[sub { shift; $pane->see($_[0]->parent); $_[0]->focus},$b[$i+1]]) if ($i<$#b);
+    $b->bind('<Up>',[sub {shift; $pane->see($_[0]->parent); $_[0]->focus},$b[$i-1]]) if ($i>0);
+    $b->bind('<Prior>',sub {
+			 my ($w)=@_;
+			 my $frame = $w->parent->parent;
+			 my $y = $w->parent->y;
+			 my $h = $pane->height;
+			 for my $b (reverse $frame->children) {
+			   my $dist = ($y-$b->y);
+			   if ($dist >= $h) {
+			     my ($c)=grep { $_->isa('Tk::Checkbutton') } $b->children;
+			     $c->focus if $c;
+			     Tk->break;
+			   }
+			 }
+		       });
+    $b->bind('<Next>',sub {
+			 my ($w)=@_;
+			 my $frame = $w->parent->parent;
+			 my $y = $w->parent->y;
+			 my $h = $pane->height;
+			 for my $b ($frame->children) {
+			   my $dist = ($b->y - $y);
+			   if ($dist >= $h) {
+			     my ($c)=grep { $_->isa('Tk::Checkbutton') } $b->children;
+			     $c->focus if $c;
+			     Tk->break;
+			   }
+			 }
+		       });
+    $b->bind('<Home>',[sub {shift; $pane->yview(qw(moveto 0));
+			   $_[0]->focus;
+			 },$b[0]]);
+    $b->bind('<End>',[sub {shift; $pane->yview(qw(moveto 1));
+			   $_[0]->focus;
+			 },$b[-1]]);
     for my $w ($b->parent,$b->parent->children) {
       $pane->BindMouseWheelVert('',$w);
       $w->bind('<1>',[$b,'focus']) unless $is_link{$w};
@@ -1018,6 +1043,7 @@ sub _add_related_service {
 		   $w->configure(-foreground => 'white')
 		 }
 	       }
+	       $pane->see($_[0]->parent);
 	     });
     $b->bind('<FocusOut>',
 	     sub {
@@ -1028,6 +1054,7 @@ sub _add_related_service {
 		   $w->configure(-foreground => 'black');
 		 }
 	       }
+	       $pane->see($_[0]->parent);
 	     });
   }
   $b[0]->focus;
@@ -1145,7 +1172,7 @@ sub check_server_version {
 			     format=>'text',
 			    ]);
   unless ($res->is_success) {
-    die "Failed to connect to server (the server is incompatible or down)!\n".$res->status_line."\n";;
+    die "Failed to connect to server (the server is incompatible, down, or you are not authorized):\n\n".$res->status_line."\n";;
   }
   my $v = $res->content;
   $v=~s/\r?\n$//;
