@@ -843,19 +843,7 @@ sub NewQuery {
     unless (-d main::dirname($filename)) {
       mkdir main::dirname($filename);
     }
-    my $fsfile = PMLInstance->load({
-      filename => $filename,
-      config   => $PMLBackend::config,
-      string   => <<"END" })->convert_to_fsfile();
-<?xml version="1.0" encoding="utf-8"?>
-<tree_query xmlns="http://ufal.mff.cuni.cz/pdt/pml/">
- <head>
-  <schema href="tree_query_schema.xml" />
- </head>
- <q-trees>
- </q-trees>
-</tree_query>
-END
+    my $fsfile = Tree_Query::Common::NewQueryFSFile($filename);
     push @main::openfiles, $fsfile;
     SetCurrentFileList($fl->name);
     ResumeFile($fsfile);
