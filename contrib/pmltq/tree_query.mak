@@ -1359,8 +1359,6 @@ sub root_style_hook {
       }
     }
   }
-#  use Data::Dumper;
-#  print Dumper(\%legend);
   my $tv = $grp->treeView;
   my $fh=$tv->getFontHeight;
   $tv->realcanvas->delete('legend');
@@ -1383,9 +1381,13 @@ sub after_redraw_hook {
   my $fh = $grp->treeView->getFontHeight;
   my $y=$scale * 10;
   my $hint='';
+
+#ifndef BTRED
   if (!$SEARCH) {
     $hint .= qq{NO SEARCH ENGINE SELECTED!\nEditing features will be limited. Press 'c' to select a search engine.\n}
   }
+#endif
+
   unless ($root and $root->firstson) {
     $hint .= qq{\n} if $hint;
     $hint .= qq{QUERY IS EMPTY!\nPressing '$insert_key' to create the first query node, or 'e' to open the query editor!\n}
