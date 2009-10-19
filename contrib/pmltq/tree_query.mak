@@ -2647,11 +2647,13 @@ sub EditQuery {
 				       trunc(#NUM#,PLACES?)
 				       percnt(#NUM#)
 				       name(#NODE?#)
+				       type_of(#NODE?#)
 				       file(#NODE?#)
 				       tree_no(#NODE?#)
 				       address(#NODE?#)
 				       substitute(#STR#,REGEXP,REPLACEMENT,FLAGS?)
 				       match(#STR#,REGEXP,FLAGS?)
+                                       first_defined(VALUE2,VALUE2,...)
 				    )
 				  ]],
 		 "\n",
