@@ -29,7 +29,6 @@ GetOptions(\%opts,
 
 if ($opts{trace}) {
   $::RD_TRACE=1;
-  shift;
 }
 sub _mk_regexp {
   my $names = shift;

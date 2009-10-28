@@ -790,7 +790,7 @@ style:<?
       and !(grep { ($_->{'#name'}||'node') ne 'node' } $this->ancestors)) {
      my $color = Tree_Query::NodeIndexInLastQuery($this);
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
-     (defined($color) ? '#{Oval-fill:#'.$Tree_Query::colors[$color].'}' : '').
+     (defined($color) ? '#{Node-tag:qnode-'.$color.'}#{Oval-fill:#'.$Tree_Query::colors[$color].'}' : '').
      '#{Line-arrowshape:14,20,4}'
    } elsif ($name eq 'node') {
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
@@ -908,7 +908,7 @@ sub attr_choices_hook {
     if ($attr_path eq 'a') {
       my $type = $SEARCH && $SEARCH->get_type_decl_for_query_node($node);
       if ($type) {
-	my @res = sort map { my $t = $_; $t=~s{#content}{[]}g; $t } $type->get_paths_to_atoms({ no_childnodes => 1 });
+	my @res = sort map { my $t = $_; $t=~s{#content}{content()}g; $t } $type->get_paths_to_atoms({ no_childnodes => 1 });
 	return @res ? \@res : ();
       }
     } elsif ($attr_path eq 'b') {
@@ -2591,7 +2591,7 @@ sub EditQuery {
 			   $type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$type if $type=~m{^/};
 			   my $decl = $SEARCH->get_decl_for($type);
 			   if ($decl) {
-			     my @res = map { my $t = $_; $t=~s{#content}{[]}g; $t } $decl->get_paths_to_atoms({ no_childnodes => 1 });
+			     my @res = map { my $t = $_; $t=~s{#content}{content()}g; $t } $decl->get_paths_to_atoms({ no_childnodes => 1 });
 			     if (@{ Tree_Query::Common::GetElementNamesForDecl($decl) }) {
 			       unshift @res, 'name()';
 			     }
