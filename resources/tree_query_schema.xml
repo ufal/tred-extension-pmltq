@@ -244,6 +244,7 @@
 	  <element name="subquery" type="q-subquery.type"/>
 	  <element name="test" type="q-test.type"/>
 	  <element name="or" type="q-group.type"/>
+	  <element name="and" type="q-group.type"/>
 	  <element name="not" type="q-group.type"/>
 	</sequence>
       </member>
