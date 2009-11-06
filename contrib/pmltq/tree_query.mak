@@ -790,7 +790,7 @@ style:<?
       and !(grep { ($_->{'#name'}||'node') ne 'node' } $this->ancestors)) {
      my $color = Tree_Query::NodeIndexInLastQuery($this);
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
-     (defined($color) ? '#{Node-tag:qnode-'.$color.'}#{Oval-fill:#'.$Tree_Query::colors[$color].'}' : '').
+     (defined($color) ? '#{Oval-fill:#'.$Tree_Query::colors[$color].'}' : '').
      '#{Line-arrowshape:14,20,4}'
    } elsif ($name eq 'node') {
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
@@ -1333,7 +1333,8 @@ sub root_style_hook {
   %legend=();
   my @nodes = GetDisplayedNodes();
   my $hv = HiddenVisible();
-  %main_query = map { $_=>1 } Tree_Query::Common::FilterQueryNodes($root);
+  my $i=1;
+  %main_query = map { $_=>$i++ } Tree_Query::Common::FilterQueryNodes($root);
   return if $no_legend;
   # icon('process-stop');
   for my $node (@nodes) {
@@ -1461,11 +1462,13 @@ sub node_style_hook {
   if ($main_query{$node}) {
     if ($is_member_node) {
       AddStyle($styles,'Node',
+	       -tag=>'qnode-'.$main_query{$node},
 	       -addheight=>3,
 	       -addwidth=>3,
 	      );
     } else {
       AddStyle($styles,'Node',
+	       -tag=>'qnode-'.$main_query{$node},
 	       -addheight=>7,
 	       -addwidth=>7,
 	      );
