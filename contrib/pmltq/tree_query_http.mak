@@ -383,7 +383,6 @@ sub get_user_defined_relations {
     my $res = $self->request('relations',
 			     [format=>'text',
 			      category=>'implementation',
-			      (defined($type) ? (type=>$type) : ())
 			     ]);
     unless ($res->is_success) {
       ErrorMessage($res->status_line, "\n");

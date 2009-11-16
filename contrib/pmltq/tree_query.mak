@@ -47,6 +47,8 @@ if ($^O eq 'darwin') {
   $insert_key = 'i';
 }
 
+my @marked_nodes;
+
 my @TOOLBAR_BINDINGS = (
   {
     command => sub {
@@ -74,6 +76,41 @@ my @TOOLBAR_BINDINGS = (
     },
     menu => 'Import query from NetGraph',
     toolbar => ['Import', 'netgraph_client' ],
+  },
+  {
+    command => sub {
+      unless (@marked_nodes) {
+	use Tk::ErrorReport;
+	# Hit off, Mock-up, Model
+	ToplevelFrame()->ErrorReport(
+	  -msgtype => "HINT",
+	  -title   => "Abstract: No marked nodes!",
+	  -message => "To use this function, you first need to mark some nodes!",
+	  -body    => <<'EOF',
+This function allows you to create a PML-TQ query from a sample of matching nodes.
+Start by marking existing nodes in a tree, then invoke this function again.
+You will then be able to select which node attributes and relations should be
+included in the query.
+
+You can mark nodes in any view with the "rslt" minor mode,
+(e.g. views displaying result trees). You can set the minor mode
+on any view using the `puzzle' icon on the status line.
+
+To mark nodes:
+
+  * hold Ctrl and click to toggle mark on a node
+  * hold Shift and click to mark a node, clearing all other marks
+
+With some nodes marked, invoke this function again.
+EOF
+	  -buttons => [qw(OK)],
+	 );
+	return;
+      }
+      node_to_pmltq_gui();
+    },
+    menu => 'Abstract: Create query from on matching nodes',
+    toolbar => ['Abstract', 'netgraph_client' ],
   },
   '---',
   {
@@ -134,19 +171,19 @@ my @TOOLBAR_BINDINGS = (
   '---',
 
   {
-    command => 'cut_to_clipboad',
+    command => 'cut_to_clipboard',
     key => 'Ctrl+Delete',
     menu => 'Cut subtree to clipboard',
     toolbar => ['Cut',  'editcut'],
    },
   {
-    command => 'copy_to_clipboad',
+    command => 'copy_to_clipboard',
     key => 'Ctrl+'.$insert_key,
     menu => 'Copy subtree to clipboard',
     toolbar => ['Copy', 'editcopy'],
   },
   {
-    command => sub { PasteClipboardWithRename(); copy_to_clipboad() },
+    command => sub { PasteClipboardWithRename(); copy_to_clipboard() },
     key => 'Shift+'.$insert_key,
     menu => 'Paste subtree from clipboard',
     toolbar => ['Paste', 'editpaste'],
@@ -416,10 +453,28 @@ DeclareMinorMode 'Tree_Query_Results' => {
     node_style_hook => sub {
       my ($node,$styles)=@_;
       my $m=$Tree_Query::is_match{$node};
-      if (defined $m) {
+      if (first { $node==$_->[0] } @marked_nodes) {
+	AddStyle($styles,'Oval',-fill => 'orange');
+	AddStyle($styles,'Node',-addwidth=>4);
+	AddStyle($styles,'Node',-addheight=>4);
+      } elsif (defined $m) {
 	AddStyle($styles,'Oval',-fill => '#'.$Tree_Query::colors[$m]);
 	AddStyle($styles,'Node',-addwidth=>3);
 	AddStyle($styles,'Node',-addheight=>3);
+      }
+    },
+    node_click_hook => sub {
+      my ($node, $mod)=@_;
+      if ($mod eq 'Shift') {
+	@marked_nodes = ([$node,CurrentFile()]);
+	Redraw_All();
+      } elsif ($mod eq 'Control') {
+	my @m = grep { $node != $_->[0] } @marked_nodes;
+	if (@m != @marked_nodes) {
+	  @marked_nodes = @m;
+	} else {
+	  push @marked_nodes,[$node,CurrentFile()];
+	}
       }
     },
     get_value_line_hook => sub {
@@ -580,6 +635,12 @@ D0EA2B b7ce1c6b0d0c E2F9FF  c1881d075743  0247FE
 #define no_extra_edit_menu_bindings
 #include <contrib/support/extra_edit.inc>
 #undefine no_extra_edit_menu_bindings
+
+### FIXUP for typos in old extra_edit:
+*cut_to_clipboard = \&cut_to_clipboad if exists &cut_to_clipboad;
+*copy_to_clipboard = \&copy_to_clipboad if exists &copy_to_clipboad;
+*paste_from_clipboard = \&paste_from_clipboad if exists &paste_from_clipboad;
+
 
 #include <contrib/support/arrows.inc>
 
@@ -1142,7 +1203,9 @@ sub PasteClipboardWithRename {
     $n=$n->following;
   }
 
-  $n = $TredMacro::nodeClipboard;
+  my $clip = $n = $TredMacro::nodeClipboard;
+  return unless $clip;
+
   while ($n) {
     if ( $n->{'#name'} =~ /^(?:node|subquery)$/ and $n->{name} ) {
       my $i = 0;
@@ -1154,7 +1217,22 @@ sub PasteClipboardWithRename {
     }
     $n = $n->following;
   }
-  paste_from_clipboad();
+  
+  my @clip = $clip->{'#name'} ? ($clip) : ($clip->children);
+  foreach my $c (@clip) {
+    if (!$this->test_child_type($c)) {
+      QuestionQuery("Cannot paste node",
+		    "The type of the clipboard node is not compatible\n"
+		      ."with the current node!",
+		    'Ok');
+      return;
+    }
+  }
+  foreach my $c (@clip) {
+    PasteNode($c,$this);
+  }
+  $this=$TredMacro::nodeClipboard;
+  $TredMacro::nodeClipboard=undef;
 }
 
 sub RenameNode {
@@ -3019,6 +3097,319 @@ sub SaveResults {
     }
   }
 }
+
+sub _toggle_tag {
+  my ($w,$i,$is_on)=@_;
+  $$is_on=!$$is_on;
+  if ($$is_on) {
+    $w->tagConfigure('b_'.$i,-foreground=>'black');
+    $w->tagConfigure('l_'.$i,-elide=>undef);
+    $w->tagConfigure('c_'.$i,-elide=>1);
+  } else {
+    $w->tagConfigure('b_'.$i,-foreground=>'white');
+    $w->tagConfigure('l_'.$i,-elide=>1);
+    $w->tagConfigure('c_'.$i,-elide=>undef);
+  }
+}
+
+sub _id_member_name {
+  my ($type)=@_;
+  return undef unless $type;
+  if ($type->get_decl_type == PML_ELEMENT_DECL) {
+    $type = $type->get_content_decl;
+  }
+  my ($omember) = $type->find_members_by_role('#ID');
+  if ($omember) {
+    return ($omember->get_name);
+  }
+  return undef; # we want this undef
+}
+
+sub node_to_pmltq_gui {
+  shift if @_ and !ref($_[0]);
+  my $node = shift||$this;
+  my $opts = shift||{};
+  my $top = $opts->{top} || ToplevelFrame();
+  my $d = $top->DialogBox(
+    -title => 'Query',
+    -buttons => [#'Add To Query', 'Replace Query', 
+      'Copy To Clipboard', 'Clean Up', 'Cancel'
+     ]);
+  $d->Label(-text=><<'EOF')->pack(qw(-expand 1 -fill x));
+This is a PML-TQ query generated from the marked nodes.
+The checkboxes on the left can be used to include or exclude
+parts of the generated query.
+EOF
+  my $t = $d->ROText();
+  my $i=-1;
+  my @tag_stack;
+  my @enabled;
+  my $pmltq;
+  if (@marked_nodes) {
+    my %id_member;
+    my $name = 'a';
+    my %node2name;
+    $opts->{id2name} = { map {
+      my $n = $_->[0];
+      my $t = $n->type;
+      my $id_member = ( $id_member{$t}||=_id_member_name($t) );
+      my $var = $node2name{$n} = $name++;
+      ($n->{$id_member} => $var)
+    } @marked_nodes };
+
+    # discover relations;
+    my %marked;
+    @marked{map $_->[0], @marked_nodes}=(); # undef by default, 1 if connected
+    my %parents=();
+    my %connect;
+    for my $m (@marked_nodes) {
+      my ($n,$fsfile) = @$m;
+      my $parent = $n->parent;
+      $parents{$parent}||=$n;
+      if ($parent and exists($marked{$parent})) {
+	push @{$connect{$n->parent}{child}}, $n;
+	print "$node2name{$n->parent} has child $node2name{$n}\n";
+	$marked{$n}=1;
+      } elsif ($parents{$parent}!=$n) {
+	push @{$connect{$parents{$parent}}{sibling}}, $n;
+	print "$node2name{$parents{$parent}} has sibling $node2name{$n}\n";
+	$marked{$n}=1;
+      } else {
+	$parent = $parent && $parent->parent;
+	while ($parent) {
+	  if (exists $marked{$parent}) {
+	    print "$node2name{$parent} has descendant $node2name{$n}\n";
+	    push @{$connect{$parent}{descendant}}, $n;
+	    $marked{$n}=1;
+	  }
+	  last;
+	  $parent = $parent->parent;
+	}
+      }
+    }
+    $opts->{connect}=\%connect;
+    $pmltq = join(";\n\n", map node_to_pmltq($_->[0],$opts),
+		  grep { !$marked{$_->[0]} } @marked_nodes);
+  } else {
+    $pmltq = node_to_pmltq($node,$opts);
+  }
+
+  for my $l (split /\n/, $pmltq) {
+    my $tag = 'l_'.(++$i);
+    my @tags = ( @tag_stack, $tag );
+    if ($l=~s/^(\s*)(?:#\s+)/$1/) {
+      $enabled[$i] = 0;
+    } else {
+      $enabled[$i] = 1;
+    }
+    my $is_end = $l=~/^\s*\][,;]?\s*$/ ? 1 :0;
+    if ($is_end) {
+      $t->insert('end',"   \t",['ignore','x_'.$i,@tag_stack]);
+    } else {
+      $t->insert('end',"[",['ignore','x_'.$i,@tag_stack]);
+      $t->insert('end',"X",['ignore','b_'.$i, @tag_stack]);
+      $t->insert('end',"]\t",['ignore','x_'.$i,@tag_stack]);
+      $l=~/^(\s*)/;
+      $t->insert('end',$1."# ".$l." ...",['ignore','c_'.$i,@tag_stack]);
+      $t->tagConfigure('c_'.$i,-foreground=>'#aaaaaa');
+      $t->tagBind('b_'.$i, '<1>' => [\&_toggle_tag,$i,\$enabled[$i]]);
+      $t->tagBind('x_'.$i, '<1>' => [\&_toggle_tag,$i,\$enabled[$i]]);
+    }
+    $t->insert('end',$l,\@tags,
+	       # '  '.join(',',@tags),undef,
+	       "\n",\@tags);
+    push @tag_stack, $tag if ($l=~/\[\s*$/);
+    pop @tag_stack if $is_end;
+
+    $enabled[$i]=!$enabled[$i]; _toggle_tag($t,$i,\$enabled[$i]);
+  }
+  $t->pack(qw(-expand 1 -fill both));
+  $d->Subwidget('B_Clean Up')->configure(-command => [\&_cleanup_query_text, $t,\@enabled ] );
+
+  # TODO: replace current query, create a new query
+  # Clean Up and Edit
+
+  $d->Subwidget('B_Copy To Clipboard')->configure(
+    -command => sub {
+      _cleanup_query_text($t,\@enabled);
+      $t->selectAll;
+      $t->clipboardCopy();
+      my $query = $t->get('0.0','end');
+      eval {
+	my $opts = {
+	  user_defined_relations => ($SEARCH && $SEARCH->get_user_defined_relations()),
+	  pmlrf_relations => ($SEARCH && $SEARCH->get_pmlrf_relations()),
+	};
+	my $qr = parse_query($query,$opts);
+	DetermineNodeType($_) for ($qr,$qr->descendants);
+	eval {
+	  Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$qr);
+	} if $SEARCH;
+	$TredMacro::nodeClipboard=$qr;
+      };
+      warn $@ if $@;
+      $d->{selected_button} = 'B_Copy To Clipboard';
+    });
+  $d->Show();
+  $d->destroy;
+}
+
+sub _cleanup_query_text {
+  my ($t,$enabled)=@_;
+  $t->DeleteTextTaggedWith('ignore');
+  for my $i (0..$#$enabled) {
+    if (not $enabled->[$i] ) {
+      $t->DeleteTextTaggedWith('l_'.$i)
+    }
+  }
+  return;
+}
+
+sub _pmltq_string {
+  my ($string)=@_;
+  $string=~s/([\\'])/\\$1/g;
+  $string=~s/(\n)/\\n/g;
+  return qq{'$string'};
+}
+
+sub node_to_pmltq {
+  shift if @_ and !ref($_[0]);
+  my $node = shift||$this;
+  my $opts = shift||{};
+  ChangingFile(0);
+  return unless $node;
+  my $type = $node->type;
+  return unless $type;
+  my $out='';
+  my $indent = $opts->{indent} || '';
+
+  my $var = $opts->{id2name} && $opts->{id2name}{$node->{_id_member_name($node->type)}};
+  $var = ' $'.$var.' := ' if $var;
+
+  $out .= Tree_Query::Common::DeclToQueryType($type).$var." [\n";
+  foreach my $attr ('#name',$type->get_normal_fields) {
+    my $m = $type->get_member_by_name($attr);
+    # next if $m and $m->get_role() eq '#ID';
+    my $val = $node->{$attr};
+    next unless defined $val;
+    $m = $type->get_member_by_name($attr.'.rf') unless $m;
+    if ($attr eq '#name') {
+      $out .= $indent.qq{  name() = '}._pmltq_string($val).qq{',\n};
+      next;
+    } elsif (!$m) {
+      $out .= $indent." # $attr ???;" unless $opts->{no_comments};
+      next;
+    }
+    my $name = $attr eq '#content' ? 'content()' : $attr;
+    next if $opts->{exclude} and $opts->{exclude}{$name};
+    $out.=member_to_pmltq($name,$val,$m,$indent.'  ',$opts);
+  }
+  if (defined $opts->{rbrothers}) {
+    $out .= $indent.qq{  # rbrothers()=$opts->{rbrothers},\n} unless $opts->{no_comments};
+  }
+  if ($opts->{connect}) {
+    my $rels = $opts->{connect}{$node};
+    if ($rels) {
+      foreach my $rel (sort keys %$rels) {
+	foreach my $n (@{$rels->{$rel}}) {
+	  $out.='  '.$indent.$rel.' '.node_to_pmltq($n,{
+	    %$opts,
+	    indent=>$indent.'  ',
+	  }).",\n";
+	}
+      }
+    }
+  } elsif ($opts->{children} or $opts->{descendants}) {
+    my $i = 0;
+    my $son = $node->firstson;
+    while ($son) {
+      $out.='  '.$indent.'child '.node_to_pmltq($son,{
+	%$opts,
+	indent=>$indent.'  ',
+	children => 0,
+	rbrothers=>$i,
+      }).",\n";
+      $i++;
+      $son=$son->rbrother;
+    }
+    $out .= $indent.qq{  # sons()=$i,\n} unless $opts->{no_comments};
+  }
+  $out.=$indent.']';
+  return $out;
+
+}
+sub member_to_pmltq {
+  my ($name, $val, $type, $indent, $opts)=@_;
+  my $out;
+  my $mtype = $name eq 'content()' ? $type : $type->get_knit_content_decl;
+  if ($mtype->get_decl_type == PML_ALT_DECL and !UNIVERSAL::isa($val,'Fslib::Alt')) {
+    $mtype = $mtype->get_knit_content_decl;
+  }
+  if (not ref($val)) {
+    if (!$mtype->is_atomic) {
+      $out.=$indent."# ignoring $name\n",
+    } else {
+      if ($type and ($type->get_role() =~ /^#(ID|ORDER)$/ or
+		       $mtype->get_decl_type == PML_CDATA_DECL and
+			 $mtype->get_format eq 'PMLREF')) {
+	if ($opts->{id2name} and $mtype->get_format eq 'PMLREF' and $val=~/(?:^.*?\#)?(.+)$/
+	      and $opts->{id2name}{$1}) {
+	  $out .= $indent.qq{$name \$}.$opts->{id2name}{$1}.qq{,\n};
+	} elsif ($opts->{no_comments}) {
+	  return;
+	} else {
+	  $out.=$indent.'# '.qq{$name = }._pmltq_string($val).qq{,\n};
+	}
+      } else {
+	$out.=$indent;
+	$out.=qq{$name = }._pmltq_string($val).qq{,\n};
+      }
+    }
+  } elsif (UNIVERSAL::isa($val,'Fslib::List')) {
+    if ($mtype->is_ordered) {
+      my $i=1;
+      foreach my $v (@$val) {
+	$out.=member_to_pmltq("$name/[$i]",$v,$mtype,$indent,$opts);
+	$i++;
+      }
+    } else {
+      foreach my $v (@$val) {
+	$out.=member_to_pmltq($name,$v,$mtype,$indent,$opts);
+      }
+    }
+  } elsif (UNIVERSAL::isa($val,'Fslib::Alt')) {
+    foreach my $v (@$val) {
+      $out.=member_to_pmltq($name,$v,$mtype,$indent,$opts);
+    }
+  } elsif (UNIVERSAL::isa($val,'Fslib::Struct') or UNIVERSAL::isa($val,'Fslib::Container')) {
+    $out.=$indent.qq{member $name \[\n};
+    foreach my $attr ($mtype->get_normal_fields) {
+      my $m = $mtype->get_member_by_name($attr);
+      # next if $m and $m->get_role() eq '#ID';
+      my $v = $val->{$attr};
+      next unless defined $v;
+      $m = $mtype->get_member_by_name($attr.'.rf') unless $m;
+      if (!$m) {
+	$out .= " # $attr ???;" unless $opts->{no_comments};
+	next;
+      }
+      my $n = $attr eq '#content' ? 'content()' : $attr;
+      next if $opts->{exclude} and $opts->{exclude}{$n};
+      $out.=member_to_pmltq($n,$v,$m,$indent.'  ',$opts);
+    }
+    $out.=$indent.qq{],\n}
+  } elsif (UNIVERSAL::isa($val,'Fslib::Seq')) {
+    my $i=1;
+    foreach my $v ($val->elements) {
+      my $n = $v->name;
+      next if $opts->{exclude} and $opts->{exclude}{$n};
+      $out.=member_to_pmltq("$name/[$i]$n",$v->value,$mtype->get_element_by_name($n),$indent,$opts);
+      $i++;
+    }
+  }
+  return $out;
+}
+
 
 } # use strict
 1;
