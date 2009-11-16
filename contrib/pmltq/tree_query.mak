@@ -3208,7 +3208,7 @@ EOF
   } else {
     $pmltq = node_to_pmltq($node,$opts);
   }
-
+  my $has_enabled_content;
   for my $l (split /\n/, $pmltq) {
     my $tag = 'l_'.(++$i);
     my @tags = ( @tag_stack, $tag );
@@ -3233,10 +3233,21 @@ EOF
     $t->insert('end',$l,\@tags,
 	       # '  '.join(',',@tags),undef,
 	       "\n",\@tags);
-    push @tag_stack, $tag if ($l=~/\[\s*$/);
-    pop @tag_stack if $is_end;
-
-    $enabled[$i]=!$enabled[$i]; _toggle_tag($t,$i,\$enabled[$i]);
+    if ($is_end) {
+      my $prev = pop @tag_stack;
+      unless ($has_enabled_content) {
+	$prev =~ s{^l_}{};
+	_toggle_tag($t,$prev,\$enabled[$prev]) if $enabled[$prev];
+      }
+    }
+    $has_enabled_content = 1 if $enabled[$i];
+    if ($l=~/\[\s*$/) {
+      push @tag_stack, $tag;
+      $has_enabled_content = undef;
+    }
+    # toggle before toggling back
+    $enabled[$i]=!$enabled[$i];
+    _toggle_tag($t,$i,\$enabled[$i]);
   }
   $t->pack(qw(-expand 1 -fill both));
   $d->Subwidget('B_'.$button{clean})->configure(-command => [\&_cleanup_query_text, $t,\@enabled, 1 ] );
@@ -3291,6 +3302,7 @@ sub _extract_query {
       pmlrf_relations => ($SEARCH && $SEARCH->get_pmlrf_relations()),
     };
     my $qr = parse_query($query,$opts);
+    $qr->{id}=new_tree_id();
     eval {
       $qr->set_type(PML::Schema()->get_type_by_name('q-query.type')->get_content_decl);
       DetermineNodeType($_) for ($qr,$qr->descendants);
