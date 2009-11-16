@@ -84,7 +84,7 @@ my @TOOLBAR_BINDINGS = (
 	# Hit off, Mock-up, Model
 	ToplevelFrame()->ErrorReport(
 	  -msgtype => "HINT",
-	  -title   => "Abstract: No marked nodes!",
+	  -title   => "Exctract Query: No marked nodes!",
 	  -message => "To use this function, you first need to mark some nodes!",
 	  -body    => <<'EOF',
 This function allows you to create a PML-TQ query from a sample of matching nodes.
@@ -109,8 +109,8 @@ EOF
       }
       node_to_pmltq_gui();
     },
-    menu => 'Abstract: Create query from on matching nodes',
-    toolbar => ['Abstract', 'netgraph_client' ],
+    menu => 'Extract Query from Selected Matching Nodes',
+    toolbar => ['Extract', 'extract' ],
   },
   '---',
   {
@@ -1220,10 +1220,11 @@ sub PasteClipboardWithRename {
   
   my @clip = $clip->{'#name'} ? ($clip) : ($clip->children);
   foreach my $c (@clip) {
+    print STDERR $c->type,", ",$this->type,": ",$this->test_child_type($c),"\n";
     if (!$this->test_child_type($c)) {
       QuestionQuery("Cannot paste node",
-		    "The type of the clipboard node is not compatible\n"
-		      ."with the current node!",
+		    "The type of the clipboard node (@{[$c->type ? $c->type->get_decl_path : '']}) is not compatible\n"
+		      ."with the current node (@{[$this->type ? $this->type->get_decl_path : '']})!",
 		    'Ok');
       return;
     }
@@ -1438,13 +1439,16 @@ sub root_style_hook {
       }
     }
   }
+
   my $tv = $grp->treeView;
   my $fh=$tv->getFontHeight;
   $tv->realcanvas->delete('legend');
   my $scale=$tv->scale_factor();
   $Opts->{baseYPos}+= $scale*(20 + $fh * (keys(%legend)
+#ifndef BTRED
 					    +
 					  ($SEARCH ? 0 : 3)
+#endif
 					    +
 					  ($root && $root->firstson ? 0 : 3)
 					 ) );
@@ -1457,7 +1461,7 @@ sub after_redraw_hook {
   my $tv = $grp->treeView;
   my $scale=$tv->scale_factor();
   my $c=$tv->realcanvas;
-  my $fh = $grp->treeView->getFontHeight;
+  my $fh = $tv->getFontHeight;
   my $y=$scale * 10;
   my $hint='';
 
@@ -1480,7 +1484,7 @@ sub after_redraw_hook {
 		   -tags=>['legend','text_item'] );
     $y+=$scale * (2+($hint=~y/\n/\n/)) * $fh;
   }
-  my $lw = $grp->treeView->get_lineWidth;
+  my $lw = $tv->get_lineWidth;
   $lw=2 if $lw<2;
 
   my @l = sort { $a->[2] cmp $b->[2] or $a->[1] cmp $b->[1] or $a->[3] cmp $b->[3] }
@@ -1524,7 +1528,6 @@ sub after_redraw_hook {
       -fill => 'lightyellow',
       -tags=>['legend'],
   ),'legend');
-
   %legend=();
 }
 
@@ -1532,6 +1535,7 @@ sub node_style_hook {
   my ($node,$styles) = @_;
   my $i=0;
   my @refs;
+
   my $qn = first { $_->{'#name'} =~ /^(?:node|subquery)$/ } ($node,$node->ancestors);
   my $showHidden = $qn->{'.unhide'} || HiddenVisible();
   my $lw = $grp->treeView->get_lineWidth;
@@ -3130,15 +3134,26 @@ sub node_to_pmltq_gui {
   my $node = shift||$this;
   my $opts = shift||{};
   my $top = $opts->{top} || ToplevelFrame();
+  my %button = (
+    paste => 'Paste Append',
+    replace => 'Paste Replace',
+    new => 'Paste New Query',
+    copy => 'Copy To Clipboard',
+    clean => 'Clean',
+    cancel => 'Cancel',
+  );
   my $d = $top->DialogBox(
     -title => 'Query',
-    -buttons => [#'Add To Query', 'Replace Query', 
-      'Copy To Clipboard', 'Clean Up', 'Cancel'
+    -buttons => [
+      @button{qw(paste replace new copy clean cancel)}
      ]);
-  $d->Label(-text=><<'EOF')->pack(qw(-expand 1 -fill x));
-This is a PML-TQ query generated from the marked nodes.
-The checkboxes on the left can be used to include or exclude
-parts of the generated query.
+  $d->Label(-justify => 'left', -anchor => 'nw',
+	    -text=><<'EOF')->pack(qw(-expand 1 -fill x));
+This is a PML-TQ query generated from the marked nodes.  Use the checkboxes 
+to include/exclude parts of the query.
+
+Then append the result to the current query, replace it, create a new one,
+or simply copy the query to the clipboard.
 EOF
   my $t = $d->ROText();
   my $i=-1;
@@ -3224,42 +3239,80 @@ EOF
     $enabled[$i]=!$enabled[$i]; _toggle_tag($t,$i,\$enabled[$i]);
   }
   $t->pack(qw(-expand 1 -fill both));
-  $d->Subwidget('B_Clean Up')->configure(-command => [\&_cleanup_query_text, $t,\@enabled ] );
+  $d->Subwidget('B_'.$button{clean})->configure(-command => [\&_cleanup_query_text, $t,\@enabled, 1 ] );
 
   # TODO: replace current query, create a new query
   # Clean Up and Edit
 
-  $d->Subwidget('B_Copy To Clipboard')->configure(
+  $d->Subwidget('B_'.$button{paste})->configure(
     -command => sub {
-      _cleanup_query_text($t,\@enabled);
-      $t->selectAll;
-      $t->clipboardCopy();
-      my $query = $t->get('0.0','end');
-      eval {
-	my $opts = {
-	  user_defined_relations => ($SEARCH && $SEARCH->get_user_defined_relations()),
-	  pmlrf_relations => ($SEARCH && $SEARCH->get_pmlrf_relations()),
-	};
-	my $qr = parse_query($query,$opts);
-	DetermineNodeType($_) for ($qr,$qr->descendants);
-	eval {
-	  Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$qr);
-	} if $SEARCH;
-	$TredMacro::nodeClipboard=$qr;
-      };
-      warn $@ if $@;
-      $d->{selected_button} = 'B_Copy To Clipboard';
+      _extract_query($t,\@enabled);
+      PasteClipboardWithRename();
+      $d->{selected_button} = $button{paste};
     });
+
+  $d->Subwidget('B_'.$button{new})->configure(
+    -command => sub {
+      _extract_query($t,\@enabled);
+      paste_as_new_tree();
+      $d->{selected_button} = $button{new};
+    });
+
+  $d->Subwidget('B_'.$button{replace})->configure(
+    -command => sub {
+      _extract_query($t,\@enabled);
+      for my $c ($root->children) {
+	CutNode($c);
+      }
+      $this=$root;
+      PasteClipboardWithRename();
+      $d->{selected_button} = $button{paste};
+    });
+
+  $d->Subwidget('B_'.$button{copy})->configure(
+    -command => sub {
+      _extract_query($t,\@enabled);
+      $d->{selected_button} = $button{copy};
+    });
+
   $d->Show();
   $d->destroy;
 }
 
-sub _cleanup_query_text {
+sub _extract_query {
   my ($t,$enabled)=@_;
-  $t->DeleteTextTaggedWith('ignore');
+  _cleanup_query_text($t,\@$enabled);
+  $t->selectAll;
+  $t->clipboardCopy();
+  my $query = $t->get('0.0','end');
+  eval {
+    my $opts = {
+      user_defined_relations => ($SEARCH && $SEARCH->get_user_defined_relations()),
+      pmlrf_relations => ($SEARCH && $SEARCH->get_pmlrf_relations()),
+    };
+    my $qr = parse_query($query,$opts);
+    eval {
+      $qr->set_type(PML::Schema()->get_type_by_name('q-query.type')->get_content_decl);
+      DetermineNodeType($_) for ($qr,$qr->descendants);
+      Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$qr) if $SEARCH;
+    };
+    $TredMacro::nodeClipboard=$qr;
+  };
+  warn $@ if $@;
+}
+
+sub _cleanup_query_text {
+  my ($t,$enabled,$keep_ignore)=@_;
+  $t->DeleteTextTaggedWith('ignore')
+    unless $keep_ignore;
   for my $i (0..$#$enabled) {
     if (not $enabled->[$i] ) {
-      $t->DeleteTextTaggedWith('l_'.$i)
+      $t->DeleteTextTaggedWith('l_'.$i);
+      if ($keep_ignore) {
+	$t->DeleteTextTaggedWith('c_'.$i);
+	$t->DeleteTextTaggedWith('x_'.$i);
+	$t->DeleteTextTaggedWith('b_'.$i);
+      }
     }
   }
   return;
