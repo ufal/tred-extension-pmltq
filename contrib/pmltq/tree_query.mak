@@ -109,8 +109,8 @@ EOF
       }
       node_to_pmltq_gui();
     },
-    menu => 'Extract Query from Selected Matching Nodes',
-    toolbar => ['Extract', 'extract' ],
+    menu => 'Distill Query from Selected Matching Nodes',
+    toolbar => ['Distill', 'distill' ],
   },
   '---',
   {
@@ -3257,21 +3257,21 @@ EOF
 
   $d->Subwidget('B_'.$button{paste})->configure(
     -command => sub {
-      _extract_query($t,\@enabled);
+      _distill_query($t,\@enabled);
       PasteClipboardWithRename();
       $d->{selected_button} = $button{paste};
     });
 
   $d->Subwidget('B_'.$button{new})->configure(
     -command => sub {
-      _extract_query($t,\@enabled);
+      _distill_query($t,\@enabled);
       paste_as_new_tree();
       $d->{selected_button} = $button{new};
     });
 
   $d->Subwidget('B_'.$button{replace})->configure(
     -command => sub {
-      _extract_query($t,\@enabled);
+      _distill_query($t,\@enabled);
       for my $c ($root->children) {
 	CutNode($c);
       }
@@ -3282,7 +3282,7 @@ EOF
 
   $d->Subwidget('B_'.$button{copy})->configure(
     -command => sub {
-      _extract_query($t,\@enabled);
+      _distill_query($t,\@enabled);
       $d->{selected_button} = $button{copy};
     });
 
@@ -3290,7 +3290,7 @@ EOF
   $d->destroy;
 }
 
-sub _extract_query {
+sub _distill_query {
   my ($t,$enabled)=@_;
   _cleanup_query_text($t,\@$enabled);
   $t->selectAll;
