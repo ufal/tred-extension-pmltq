@@ -78,13 +78,16 @@ my @TOOLBAR_BINDINGS = (
     toolbar => ['Import', 'netgraph_client' ],
   },
   {
+    key=>'S',
+    menu => 'Suggest Query from Selected Matching Nodes',
+    toolbar => ['Suggest', 'distill' ],
     command => sub {
       unless (@marked_nodes) {
 	use Tk::ErrorReport;
 	# Hit off, Mock-up, Model
 	ToplevelFrame()->ErrorReport(
 	  -msgtype => "HINT",
-	  -title   => "Exctract Query: No marked nodes!",
+	  -title   => "Suggest Query: No marked nodes!",
 	  -message => "To use this function, you first need to mark some nodes!",
 	  -body    => <<'EOF',
 This function allows you to create a PML-TQ query from a sample of matching nodes.
@@ -109,8 +112,6 @@ EOF
       }
       node_to_pmltq_gui();
     },
-    menu => 'Distill Query from Selected Matching Nodes',
-    toolbar => ['Distill', 'distill' ],
   },
   '---',
   {
@@ -3161,50 +3162,7 @@ EOF
   my @enabled;
   my $pmltq;
   if (@marked_nodes) {
-    my %id_member;
-    my $name = 'a';
-    my %node2name;
-    $opts->{id2name} = { map {
-      my $n = $_->[0];
-      my $t = $n->type;
-      my $id_member = ( $id_member{$t}||=_id_member_name($t) );
-      my $var = $node2name{$n} = $name++;
-      ($n->{$id_member} => $var)
-    } @marked_nodes };
-
-    # discover relations;
-    my %marked;
-    @marked{map $_->[0], @marked_nodes}=(); # undef by default, 1 if connected
-    my %parents=();
-    my %connect;
-    for my $m (@marked_nodes) {
-      my ($n,$fsfile) = @$m;
-      my $parent = $n->parent;
-      $parents{$parent}||=$n;
-      if ($parent and exists($marked{$parent})) {
-	push @{$connect{$n->parent}{child}}, $n;
-	print "$node2name{$n->parent} has child $node2name{$n}\n";
-	$marked{$n}=1;
-      } elsif ($parents{$parent}!=$n) {
-	push @{$connect{$parents{$parent}}{sibling}}, $n;
-	print "$node2name{$parents{$parent}} has sibling $node2name{$n}\n";
-	$marked{$n}=1;
-      } else {
-	$parent = $parent && $parent->parent;
-	while ($parent) {
-	  if (exists $marked{$parent}) {
-	    print "$node2name{$parent} has descendant $node2name{$n}\n";
-	    push @{$connect{$parent}{descendant}}, $n;
-	    $marked{$n}=1;
-	  }
-	  last;
-	  $parent = $parent->parent;
-	}
-      }
-    }
-    $opts->{connect}=\%connect;
-    $pmltq = join(";\n\n", map node_to_pmltq($_->[0],$opts),
-		  grep { !$marked{$_->[0]} } @marked_nodes);
+    $pmltq = nodes_to_pmltq([map $_->[0],@marked_nodes],$opts);
   } else {
     $pmltq = node_to_pmltq($node,$opts);
   }
@@ -3337,6 +3295,56 @@ sub _pmltq_string {
   return qq{'$string'};
 }
 
+sub nodes_to_pmltq {
+  my ($nodes,$opts)=@_;
+  $opts||={};
+  my %id_member;
+  my $name = 'a';
+  $name++ while $opts->{reserved_names}  && exists($opts->{reserved_names}{$name});
+  my %node2name;
+  $opts->{id2name} = { map {
+    my $n = $_;
+    my $t = $n->type;
+    my $id_member = ( $id_member{$t}||=_id_member_name($t) );
+    my $var = $node2name{$n} = $name++;
+    $name++ while $opts->{reserved_names}  && exists($opts->{reserved_names}{$name});
+    ($n->{$id_member} => $var)
+  } @$nodes };
+
+  # discover relations;
+  my %marked;
+  @marked{@$nodes}=(); # undef by default, 1 if connected
+  my %parents=();
+  my %connect;
+  for my $n (@$nodes) {
+    my $parent = $n->parent;
+    $parents{$parent}||=$n;
+    if ($parent and exists($marked{$parent})) {
+      push @{$connect{$n->parent}{child}}, $n;
+      # print STDERR "$node2name{$n->parent} has child $node2name{$n}\n";
+      $marked{$n}=1;
+    } elsif ($parents{$parent}!=$n) {
+      push @{$connect{$parents{$parent}}{sibling}}, $n;
+      # print STDERR "$node2name{$parents{$parent}} has sibling $node2name{$n}\n";
+      $marked{$n}=1;
+    } else {
+      $parent = $parent && $parent->parent;
+      while ($parent) {
+	if (exists $marked{$parent}) {
+	  # print STDERR "$node2name{$parent} has descendant $node2name{$n}\n";
+	  push @{$connect{$parent}{descendant}}, $n;
+	  $marked{$n}=1;
+	  last;
+	}
+	$parent = $parent->parent;
+      }
+    }
+  }
+  $opts->{connect}=\%connect;
+  return join(";\n\n", map node_to_pmltq($_,$opts),
+		grep { !$marked{$_} } @$nodes);
+}
+
 sub node_to_pmltq {
   shift if @_ and !ref($_[0]);
   my $node = shift||$this;
@@ -3359,7 +3367,7 @@ sub node_to_pmltq {
     next unless defined $val;
     $m = $type->get_member_by_name($attr.'.rf') unless $m;
     if ($attr eq '#name') {
-      $out .= $indent.qq{  name() = '}._pmltq_string($val).qq{',\n};
+      $out .= $indent.qq{  name() = }._pmltq_string($val).qq{,\n};
       next;
     } elsif (!$m) {
       $out .= $indent." # $attr ???;" unless $opts->{no_comments};
