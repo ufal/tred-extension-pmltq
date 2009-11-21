@@ -3162,9 +3162,9 @@ EOF
   my @enabled;
   my $pmltq;
   if (@marked_nodes) {
-    $pmltq = nodes_to_pmltq([map $_->[0],@marked_nodes],$opts);
+    $pmltq = nodes_to_pmltq(\@marked_nodes,$opts);
   } else {
-    $pmltq = node_to_pmltq($node,$opts);
+    $pmltq = node_to_pmltq($node,CurrentFile(),$opts);
   }
   my $has_enabled_content;
   for my $l (split /\n/, $pmltq) {
@@ -3243,10 +3243,17 @@ EOF
       _distill_query($t,\@enabled);
       $d->{selected_button} = $button{copy};
     });
-
+  $d->BindButtons;
+  $d->BindEscape;
   $d->Show();
   $d->destroy;
 }
+
+=item nodes_to_pmltq([$node1, ...]);
+
+Returns a PMLTQ query based on the given nodes and their relations.
+
+=cut
 
 sub _distill_query {
   my ($t,$enabled)=@_;
@@ -3303,7 +3310,7 @@ sub nodes_to_pmltq {
   $name++ while $opts->{reserved_names}  && exists($opts->{reserved_names}{$name});
   my %node2name;
   $opts->{id2name} = { map {
-    my $n = $_;
+    my $n = $_->[0];
     my $t = $n->type;
     my $id_member = ( $id_member{$t}||=_id_member_name($t) );
     my $var = $node2name{$n} = $name++;
@@ -3313,10 +3320,11 @@ sub nodes_to_pmltq {
 
   # discover relations;
   my %marked;
-  @marked{@$nodes}=(); # undef by default, 1 if connected
+  @marked{map $_->[0], @$nodes}=(); # undef by default, 1 if connected
   my %parents=();
   my %connect;
-  for my $n (@$nodes) {
+  for my $m (@$nodes) {
+    my ($n,$fsfile)=@$m;
     my $parent = $n->parent;
     $parents{$parent}||=$n;
     if ($parent and exists($marked{$parent})) {
@@ -3341,14 +3349,13 @@ sub nodes_to_pmltq {
     }
   }
   $opts->{connect}=\%connect;
-  return join(";\n\n", map node_to_pmltq($_,$opts),
-		grep { !$marked{$_} } @$nodes);
+  return join(";\n\n", map {
+    node_to_pmltq($_->[0],$_->[1],$opts)}
+		grep { !$marked{$_->[0]} } @$nodes);
 }
 
 sub node_to_pmltq {
-  shift if @_ and !ref($_[0]);
-  my $node = shift||$this;
-  my $opts = shift||{};
+  my ($node,$fsfile,$opts)=@_;
   ChangingFile(0);
   return unless $node;
   my $type = $node->type;
@@ -3375,7 +3382,7 @@ sub node_to_pmltq {
     }
     my $name = $attr eq '#content' ? 'content()' : $attr;
     next if $opts->{exclude} and $opts->{exclude}{$name};
-    $out.=member_to_pmltq($name,$val,$m,$indent.'  ',$opts);
+    $out.=member_to_pmltq($name,$val,$m,$indent.'  ',$fsfile,$opts);
   }
   if (defined $opts->{rbrothers}) {
     $out .= $indent.qq{  # rbrothers()=$opts->{rbrothers},\n} unless $opts->{no_comments};
@@ -3385,7 +3392,7 @@ sub node_to_pmltq {
     if ($rels) {
       foreach my $rel (sort keys %$rels) {
 	foreach my $n (@{$rels->{$rel}}) {
-	  $out.='  '.$indent.$rel.' '.node_to_pmltq($n,{
+	  $out.='  '.$indent.$rel.' '.node_to_pmltq($n,$fsfile,{
 	    %$opts,
 	    indent=>$indent.'  ',
 	  }).",\n";
@@ -3396,7 +3403,7 @@ sub node_to_pmltq {
     my $i = 0;
     my $son = $node->firstson;
     while ($son) {
-      $out.='  '.$indent.'child '.node_to_pmltq($son,{
+      $out.='  '.$indent.'child '.node_to_pmltq($son,$fsfile,{
 	%$opts,
 	indent=>$indent.'  ',
 	children => 0,
@@ -3411,8 +3418,26 @@ sub node_to_pmltq {
   return $out;
 
 }
+
+sub resolve_pmlref {
+  my ($ref,$fsfile)=@_;
+  if ($ref=~m{^(.+?)\#(.+)$}) {
+    my ($file_id,$id)=($1,$2);
+    my $refs = $fsfile->appData('ref');
+    my $reffile = $refs && $refs->{$file_id};
+    if (UNIVERSAL::isa($reffile,'FSFile')) {
+      return PML::GetNodeByID($id,$reffile);
+    } elsif (UNIVERSAL::isa($reffile,'PMLInstance')) {
+      return $reffile->lookup_id($id);
+    }
+  } elsif ($ref=~m{\#?([^#]+)}) {
+    return PML::GetNodeByID($1);
+  }
+  return undef;
+}
+
 sub member_to_pmltq {
-  my ($name, $val, $type, $indent, $opts)=@_;
+  my ($name, $val, $type, $indent, $fsfile, $opts)=@_;
   my $out;
   my $mtype = $name eq 'content()' ? $type : $type->get_knit_content_decl;
   if ($mtype->get_decl_type == PML_ALT_DECL and !UNIVERSAL::isa($val,'Fslib::Alt')) {
@@ -3422,12 +3447,17 @@ sub member_to_pmltq {
     if (!$mtype->is_atomic) {
       $out.=$indent."# ignoring $name\n",
     } else {
-      if ($type and ($type->get_role() =~ /^#(ID|ORDER)$/ or
-		       $mtype->get_decl_type == PML_CDATA_DECL and
-			 $mtype->get_format eq 'PMLREF')) {
-	if ($opts->{id2name} and $mtype->get_format eq 'PMLREF' and $val=~/(?:^.*?\#)?(.+)$/
-	      and $opts->{id2name}{$1}) {
+      my $is_pmlref = (($mtype->get_decl_type == PML_CDATA_DECL) and ($mtype->get_format eq 'PMLREF')) ? 1 : 0;
+      if ($type and ($type->get_role() =~ /^#(ID|ORDER)$/ or $is_pmlref)) {
+	if ($is_pmlref and $opts->{id2name} and $val=~/(?:^.*?\#)?(.+)$/ and $opts->{id2name}{$1}) {
 	  $out .= $indent.qq{$name \$}.$opts->{id2name}{$1}.qq{,\n};
+	} elsif ($is_pmlref) {
+	  my $target = resolve_pmlref($val,$fsfile);
+	  if ($target && $target->type) {
+	    $out.=$indent.'# '.$name.' '.Tree_Query::Common::DeclToQueryType( $target->type ).qq{ [ ],\n};
+	  } else {
+	    $out.=$indent.'# '.$name.qq{->[ ],\n};
+	  }
 	} elsif ($opts->{no_comments}) {
 	  return;
 	} else {
@@ -3442,17 +3472,17 @@ sub member_to_pmltq {
     if ($mtype->is_ordered) {
       my $i=1;
       foreach my $v (@$val) {
-	$out.=member_to_pmltq("$name/[$i]",$v,$mtype,$indent,$opts);
+	$out.=member_to_pmltq("$name/[$i]",$v,$mtype,$indent,$fsfile,$opts);
 	$i++;
       }
     } else {
       foreach my $v (@$val) {
-	$out.=member_to_pmltq($name,$v,$mtype,$indent,$opts);
+	$out.=member_to_pmltq($name,$v,$mtype,$indent,$fsfile,$opts);
       }
     }
   } elsif (UNIVERSAL::isa($val,'Fslib::Alt')) {
     foreach my $v (@$val) {
-      $out.=member_to_pmltq($name,$v,$mtype,$indent,$opts);
+      $out.=member_to_pmltq($name,$v,$mtype,$indent,$fsfile,$opts);
     }
   } elsif (UNIVERSAL::isa($val,'Fslib::Struct') or UNIVERSAL::isa($val,'Fslib::Container')) {
     $out.=$indent.qq{member $name \[\n};
@@ -3468,7 +3498,7 @@ sub member_to_pmltq {
       }
       my $n = $attr eq '#content' ? 'content()' : $attr;
       next if $opts->{exclude} and $opts->{exclude}{$n};
-      $out.=member_to_pmltq($n,$v,$m,$indent.'  ',$opts);
+      $out.=member_to_pmltq($n,$v,$m,$indent.'  ',$fsfile,$opts);
     }
     $out.=$indent.qq{],\n}
   } elsif (UNIVERSAL::isa($val,'Fslib::Seq')) {
@@ -3476,7 +3506,7 @@ sub member_to_pmltq {
     foreach my $v ($val->elements) {
       my $n = $v->name;
       next if $opts->{exclude} and $opts->{exclude}{$n};
-      $out.=member_to_pmltq("$name/[$i]$n",$v->value,$mtype->get_element_by_name($n),$indent,$opts);
+      $out.=member_to_pmltq("$name/[$i]$n",$v->value,$mtype->get_element_by_name($n),$indent,$fsfile,$opts);
       $i++;
     }
   }
