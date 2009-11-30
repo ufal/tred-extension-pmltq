@@ -2724,7 +2724,7 @@ sub EditQuery {
 				       lower(#STR#)
 				       upper(#STR#)
 				       length(#STR#)
-				       substr(#STR#,OFFSET,LEN?),
+				       substr(#STR#,OFFSET,LEN?)
 				       tr(#STR#,CHARS_TO_REPLACE,REPLACEMENT_CHARS)
 				       replace(#STR#,SUBSTR,REPLACEMENT)
 				       ciel(#NUM#)
