@@ -592,7 +592,7 @@ sub init {
   $self->load_config_file($config_file) || return;
   my $configuration = $self->{config}{data};
 
-  my $cfgs = $self->{config}{pml}->get_root->{configurations};
+  my $cfgs = ($self->{config}{pml}->get_root->{configurations} ||= Fslib::Seq->new);
   my $cfg_type = $self->{config}{type};
   if (GUI() and !$id) {
     require Tk::QueryDialog;
