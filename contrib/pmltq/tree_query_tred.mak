@@ -20,6 +20,8 @@ BEGIN {
   *DEBUG = \$Tree_Query::BtredEvaluator::DEBUG;
 }
 
+our $NO_PLANNING = 0;
+
 $Tree_Query::TrEdSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
 
 sub new {
@@ -86,6 +88,7 @@ sub search_first {
 							top_layer_only => $self->{top_layer_only} ? 1 : 0,
 							no_filters => $opts->{no_filters},
 							count => $opts->{count},
+							no_plan => $NO_PLANNING,
 						      });
   $self->{current_result} = undef;
   $self->{past_results}=[];
@@ -203,13 +206,33 @@ sub _before_filelist_search {
     $toolbar->update;
   };
   register_open_file_hook($on_open);
-  return $self->{_aux}=[$on_open,$b];
+  my $orig_alarm = $SIG{ALRM};
+  my $orig_progress = $Tree_Query::BtredEvaluator::PROGRESS;
+  my $sig_update = sub {
+    $Tree_Query::BtredEvaluator::PROGRESS = undef;
+    $time=time;
+    ${$self->{label}}="Searching in file ".CurrentFileNo()." of ".$count."... ";
+    $toolbar->update;
+    alarm(1);
+    return 1;
+  };
+  $SIG{ALRM} = sub {
+    $Tree_Query::BtredEvaluator::PROGRESS = $sig_update;
+  };
+  alarm(2);
+  return $self->{_aux}=[$on_open,$b,$orig_alarm,$orig_progress];
 }
 
 sub _after_filelist_search {
   my ($self)=@_;
   return unless $self->{_aux};
-
+  alarm(0);
+  if ($self->{_aux}[2]) {
+    $SIG{ALRM}=$self->{_aux}[2];
+  } else {
+    delete $SIG{ALRM};
+  }
+  $Tree_Query::BtredEvaluator::PROGRESS = $self->{_aux}[3];
   unregister_open_file_hook($self->{_aux}[0]);
   my $b = $self->{_aux}[1];
   $b->packForget;
