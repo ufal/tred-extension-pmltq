@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <pml_schema
   xmlns="http://ufal.mff.cuni.cz/pdt/pml/schema/" version="1.2">
-  <revision>0.0.7</revision>
+  <revision>0.0.8</revision>
   <description>A simple schema for query trees</description>
 
   <root name="tree_query" type="q-tree_query.type"/>
@@ -32,6 +32,7 @@
 	</alt>
       </member>
       <delete>optional</delete>
+      <delete>overlapping</delete>
     </structure>
   </derive>
 
@@ -234,6 +235,7 @@
       <member name="description"><cdata format="any"/></member>
       <member name="node-type"><cdata format="token"/></member>
       <member name="optional" type="bool"/>
+      <member name="overlapping" type="bool"/>
       <member name="relation" type="q-relation.type"/>
 <!--      <member name="edge-transitive" type="bool"/> -->
       <member name="conditions" type="q-group.type"/>
