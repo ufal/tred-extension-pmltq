@@ -314,8 +314,11 @@ sub select_matching_node {
 }
 
 sub get_node_types {
-  my ($self)=@_;
-  my $res = $self->request('nodetypes',[format=>'text']);
+  my ($self,$schema_name)=@_;
+  my $res = $self->request('nodetypes',[
+    format=>'text',
+    (defined($schema_name) ? (layer=>$schema_name) : ()),
+   ]);
   unless ($res->is_success) {
     ErrorMessage($res->status_line, "\n");
     return;
@@ -360,7 +363,7 @@ sub get_type_decl_for_query_node {
 
 sub get_decl_for {
   my ($self,$type)=@_;
-  return unless $type;
+  return unless $type or $type=~/:\*$/;
   return $self->{type_decls}{$type} ||= Tree_Query::Common::QueryTypeToDecl($type,$self->get_schema($self->get_schema_name_for($type)));
 }
 
@@ -1250,7 +1253,6 @@ sub get_query_nodes {
 }
 
 
-my ($userlogin) = (getlogin() || ($^O ne 'MSWin32') && getpwuid($<) || 'unknown');
 $DEFAULTS{pmltq_config} = <<"EOF";
 <pmltq_config xmlns="http://ufal.mff.cuni.cz/pdt/pml/">
   <head>
@@ -1260,13 +1262,6 @@ $DEFAULTS{pmltq_config} = <<"EOF";
   <row_limit>$DEFAULTS{row_limit}</row_limit>
   <timeout>$DEFAULTS{timeout}</timeout>
   <configurations>
-<!--
-    <http id="localhost">
-      <url>http://localhost:8121/</host>
-      <username>$userlogin</username>
-      <password></password>
-    </http>
--->
   </configurations>
 </pmltq_config>
 EOF
