@@ -787,6 +787,9 @@ label:#{darkgreen}<?
   length $occ ? '#{-coords:n-10,n}#{-anchor:e}${occurrences='.$occ.'x}' : ""
 ?><? $${optional} ? '#{-coords:n-10,n}#{-anchor:e}${optional=?}'  : q()
 ?>
+label:<?
+  $this->{overlapping} ? '#{darkgreen}#{-anchor:w}#{-coords:n+13,n}${overlapping=+}' : ()
+?>
 
 node: #{brown(}${description}
 
@@ -2745,6 +2748,7 @@ sub EditQuery {
 				       address(#NODE?#)
 				       substitute(#STR#,REGEXP,REPLACEMENT,FLAGS?)
 				       match(#STR#,REGEXP,FLAGS?)
+                                       if(#CONDITION#,VALUE_IF_TRUE,VALUE_IF_FALSE)
                                        first_defined(VALUE2,VALUE2,...)
 				    )
 				  ]],
