@@ -88,7 +88,7 @@ sub show_result {
 	  CloseFileInWindow($win);
 	}
       } else {
-	CloseFileInWindow($win);
+	# CloseFileInWindow($win);
       }
       $win->{noRedraw}=0;
       unless ($win==$save[2]) {
