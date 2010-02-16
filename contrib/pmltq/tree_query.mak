@@ -347,6 +347,18 @@ EOF
   {
     command =>  sub {
       ChangingFile(0);
+      unless ($this->{'#name'} eq 'node' or $this->{'#name'} eq 'subquery') {
+	return;
+      }
+      $this->{overlapping}=!$this->{overlapping};
+      ChangingFile(1);
+    },
+    key => '+',
+    menu => 'Toggle overlapping',
+  },
+  {
+    command =>  sub {
+      ChangingFile(0);
       my $orig_name = $this->{'#name'};
       if ($orig_name eq 'node' and
 	    $this->parent and $this->parent->parent and $this->parent->{'#name'} =~ /^(?:node|subquery)$/) {
