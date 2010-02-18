@@ -8,6 +8,7 @@ package TredMacro;
 
 my $query;
 
+use Encode;
 use Getopt::Long;
 my $optparser=new Getopt::Long::Parser(config => ["bundling"]);
 my %opts;
@@ -41,7 +42,7 @@ unless ($opts{info}) {
       $query=~s/#\s*==\s*query:\s*\Q$opts{'query-id'}\E\s* ==(.*?)(?:#\s*==\s*query:\s*\w+\s*==.*|$)/$1/s;
     }
   } else {
-    $query = $opts{query} || join (' ',@ARGS);
+    $query = Encode::decode('UTF-8',($opts{query} || join (' ',@ARGS)));
   }
 
   if (!ref($query) and $opts{'netgraph-query'}) {
@@ -58,7 +59,6 @@ unless ($opts{info}) {
       $query->{'output-filters'}||=Fslib::List->new();
       push @{$query->{'output-filters'}},@{ Tree_Query::Common::parse_filters($filters) };
       #    print Data::Dumper::Dumper($query->{'output-filters'});
-
     } elsif ($query) {
       $query .= $filters;
     }
