@@ -185,7 +185,7 @@ __END__
 
 =head1 NAME
 
-Tree_Query::TrEd - common subclass for TrEd interfaces of Tree_Query search backends
+Tree_Query::TrEd - common super-class for TrEd interfaces of Tree_Query search backends
 
 =head1 SYNOPSIS
 
