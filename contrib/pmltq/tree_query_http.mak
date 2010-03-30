@@ -11,7 +11,7 @@ package TrEd::PMLTQ::UserAgent;
   use base qw(LWP::UserAgent);
   sub credentials {
     shift; # self
-    return $IOBackend::lwp_user_agent->credentials(@_);
+    return $Treex::PML::IO::lwp_user_agent->credentials(@_);
   }
   sub get_basic_credentials {
     return;
@@ -28,13 +28,13 @@ use Scalar::Util qw(weaken);
 use HTTP::Request::Common;
 use File::Temp;
 use Encode;
-use PMLSchema;
+use Treex::PML::Schema;
 use URI;
 
 use vars qw($VERSION $MIN_SERVER_VERSION);
 $VERSION = "0.2";
 $MIN_SERVER_VERSION = "0.3";
-my $ua = $IOBackend::lwp_user_agent; #TrEd::PMLTQ::UserAgent->new();
+my $ua = $Treex::PML::IO::lwp_user_agent; #TrEd::PMLTQ::UserAgent->new();
 
 #use LWP::UserAgent;
 
@@ -47,8 +47,8 @@ our %DEFAULTS = (
 );
 
 $Tree_Query::HTTPSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
-# my $ua = $IOBackend::lwp_user_agent;
-#$ua = IOBackend->new;
+# my $ua = $Treex::PML::IO::lwp_user_agent;
+#$ua = Treex::PML::IO::UserAgent->new;
 #$ua->agent("TrEd/1.0 ");
 
 sub new {
@@ -110,7 +110,7 @@ sub identify {
   if ($self->{config}{data}) {
     my $cfg = $self->{config}{data};
     $ident.=' ';
-    my $title = PMLInstance::get_data($cfg,'cached_description/title');
+    my $title = Treex::PML::Instance::get_data($cfg,'cached_description/title');
     if ($title) {
       $ident.=$title;
     } else {
@@ -540,7 +540,7 @@ sub get_schema {
   unless ($res->is_success) {
     die "Failed to obtain PML schema $name ".$res->status_line."\n";;
   }
-  return $self->{schemas}{$name} = PMLSchema->new({string => Encode::decode_utf8($res->content,1)})
+  return $self->{schemas}{$name} = Treex::PML::Schema->new({string => Encode::decode_utf8($res->content,1)})
     || die "Failed to obtain PML schema $name\n";
 }
 
@@ -582,7 +582,7 @@ sub _request {
 
 sub _cfg_label {
   my ($cfg)=@_;
-  return $cfg->{id}." : ".(PMLInstance::get_data($cfg,'cached_description/title')||'');
+  return $cfg->{id}." : ".(Treex::PML::Instance::get_data($cfg,'cached_description/title')||'');
 }
 sub _cfg_id_from_label {
   my ($label)=@_;
@@ -595,14 +595,14 @@ sub init {
   $self->load_config_file($config_file) || return;
   my $configuration = $self->{config}{data};
 
-  my $cfgs = ($self->{config}{pml}->get_root->{configurations} ||= Fslib::Seq->new);
+  my $cfgs = ($self->{config}{pml}->get_root->{configurations} ||= Treex::PML::Factory->createSeq);
   my $cfg_type = $self->{config}{type};
   if (GUI() and !$id) {
     require Tk::QueryDialog;
     my @confs = (map $_->value, grep $_->name eq 'http', SeqV($cfgs));
 
     unless (@confs) {
-      my $cfg = Fslib::Struct->new();
+      my $cfg = Treex::PML::Factory->createStructure();
       $cfg->{id} = $self->_new_cfg_id($cfgs);
       edit_config('Edit connection',$cfg,$cfg_type,'url') || return;
       $cfgs->push_element('http',$cfg);
@@ -708,7 +708,7 @@ sub init {
 		     my ($self,$cfgs,$l) = @_;
 		     my $id = $l->info('anchor');
 		     my $cfg = $l->info('data', $id);
-		     my $title = PMLInstance::get_data($cfg,'cached_description/title') || '';
+		     my $title = Treex::PML::Instance::get_data($cfg,'cached_description/title') || '';
 		     if ($id and
 			   $l->QuestionQuery(
 			     -title => 'Remove connection',
@@ -749,7 +749,7 @@ sub init {
 
 sub _new_service_url {
   my ($self,$cfgs,$cfg_type,$l)=@_;
-  my $cfg = Fslib::Struct->new();
+  my $cfg = Treex::PML::Factory->createStructure();
   $cfg->{id} = $self->_new_cfg_id($cfgs);
   edit_config('Edit connection',$cfg,$cfg_type,'url',$l->toplevel) || return;
   $cfgs->push_element('http',$cfg);
@@ -778,7 +778,7 @@ sub _add_cfg_items_to_hlist {
 
 sub _add_cfg_item {
   my ($self, $hlist, $item, $cfg)=@_;
-  my @cols = map PMLInstance::get_data($cfg,$_),
+  my @cols = map Treex::PML::Instance::get_data($cfg,$_),
     qw(id cached_description/title url);
   my $exists = $hlist->info('exists',$item);
   if ($item ne $cfg->{id}) {
@@ -842,7 +842,7 @@ sub _update_service_info {
 
 sub _update_cached_info {
   my ($self,$cfg,$service_info)=@_;
-  $cfg->{cached_description} ||= Fslib::Struct->new();
+  $cfg->{cached_description} ||= Treex::PML::Factory->createStructure();
   foreach my $key (qw(title abstract moreinfo)) {
     $cfg->{cached_description}{$key}=$service_info->{$key};
   }
@@ -1086,7 +1086,7 @@ sub _add_related_service {
     if ($enabled{$s->{service}}) {
       my $new_id;
       ($new_id,$ids_ref) = $self->_new_cfg_id($cfgs,undef,$ids_ref);
-      my $c = Fslib::Struct->new({
+      my $c = Treex::PML::Factory->createStructure({
 	id => $new_id,
 	url => $s->{service},
 	username => $cfg->{username},
@@ -1180,7 +1180,7 @@ sub check_server_version {
   $v=~s/\r?\n$//;
   if ($v!~/^(IN)?COMPATIBLE\s+(\S+)/ or $1) {
     die "Server requires a newer version of this client; please upgrade the 'pmltq' TrEd extension!!\n";
-  } elsif (PMLSchema::cmp_revisions($MIN_SERVER_VERSION,$2)>0) {
+  } elsif (Treex::PML::Schema::cmp_revisions($MIN_SERVER_VERSION,$2)>0) {
     die "Server is too old for this client; please ask your PML-TQ server administrator to upgrade!\n";
   }
   return 1;
@@ -1215,24 +1215,24 @@ sub load_config_file {
 				$config_file ne $self->{config}{pml}->get_filename)) {
     if ($config_file) {
       die "Configuration file '$config_file' does not exist!" unless -f $config_file;
-      $self->{config}{pml} = PMLInstance->load({ filename=>$config_file });
+      $self->{config}{pml} = Treex::PML::Instance->load({ filename=>$config_file });
     } else {
       $config_file ||= FindInResources('treebase.conf');
       if (-f $config_file) {
 	# we need this extension's resource paths precede TrEd's resource paths
 	# since old versions of TrEd include old version of treebase_conf_schema.xml
-	my @paths = Fslib::ResourcePaths();
+	my @paths = Treex::PML::ResourcePaths();
 	eval {
-	  Fslib::AddResourcePathAsFirst(CallerDir(File::Spec->catdir('..','resources')));
-	  $self->{config}{pml} = PMLInstance->load({ filename=>$config_file });
+	  Treex::PML::AddResourcePathAsFirst(CallerDir(File::Spec->catdir('..','resources')));
+	  $self->{config}{pml} = Treex::PML::Instance->load({ filename=>$config_file });
 	};
-	Fslib::SetResourcePaths(@paths);
+	Treex::PML::SetResourcePaths(@paths);
 	die $@ if $@;
       } else {
 	my $tred_d = File::Spec->catfile($ENV{HOME},'.tred.d');
 	mkdir $tred_d unless -d $tred_d;
 	$config_file = File::Spec->catfile($tred_d,'treebase.conf');
-	$self->{config}{pml} = PMLInstance->load({ string => $DEFAULTS{pmltq_config},
+	$self->{config}{pml} = Treex::PML::Instance->load({ string => $DEFAULTS{pmltq_config},
 						   filename=> $config_file});
 	$self->{config}{pml}->save();
       }

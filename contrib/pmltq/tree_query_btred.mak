@@ -48,9 +48,11 @@ sub init_search {
     DetermineNodeType($_) for $query_tree->descendants;
   } else {
     my ($query_fn,$query_id)=@ARGV;
-    my $query_file = FSFile->newFSFile($query_fn,[Backends()]);
+    my $query_file = Treex::PML::Factory->createDocumentFromFile($query_fn, {
+      backends => [Backends()]
+    });
     if (ref($query_file)) {
-      if ($Fslib::FSError!=0) {
+      if ($Treex::PML::FSError!=0) {
 	die "Error: loading query-file failed: $@ ($!)\n";
       } elsif ($query_file->lastTreeNo<0) {
 	die "Error: Query file is empty\n";

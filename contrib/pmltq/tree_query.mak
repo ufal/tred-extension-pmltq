@@ -12,7 +12,7 @@ BEGIN {
   import PML qw(&SchemaName);
 }
 
-use PMLSchema qw(:constants);
+use Treex::PML::Schema qw(:constants);
 use File::Spec;
 use Benchmark ':hireswallclock';
 
@@ -20,6 +20,8 @@ use lib CallerDir();
 
 use Tree_Query::Common qw(:all);
 use Tree_Query::NG2PMLTQ qw(ng2pmltq);
+
+use UNIVERSAL::DOES;
 
 our $VALUE_LINE_MODE = 0;
 our @SEARCHES;
@@ -375,7 +377,7 @@ EOF
 	return;
       }
       if (not (AltV($this->{'occurrences'}))) {
-	$this->{occurrences}=Fslib::Struct->new({min=>1});
+	$this->{occurrences}=Treex::PML::Factory->createStructure({min=>1});
       }
       local $main::sortAttrs=0;
       if (EditAttribute($this,'occurrences')) {
@@ -641,8 +643,8 @@ D0EA2B b7ce1c6b0d0c E2F9FF  c1881d075743  0247FE
 
 
  my %schema_map = (
-#   't-node' => PMLSchema->new({filename => 'tdata_schema.xml',use_resources=>1}),
-#   'a-node' => PMLSchema->new({filename => 'adata_schema.xml',use_resources=>1}),
+#   't-node' => Treex::PML::Schema->new({filename => 'tdata_schema.xml',use_resources=>1}),
+#   'a-node' => Treex::PML::Schema->new({filename => 'adata_schema.xml',use_resources=>1}),
 );
 
 #define no_extra_edit_menu_bindings
@@ -920,7 +922,7 @@ sub NewQuery {
     unless (-d main::dirname($filename)) {
       mkdir main::dirname($filename);
     }
-    my $fsfile = Tree_Query::Common::NewQueryFSFile($filename);
+    my $fsfile = Tree_Query::Common::NewQueryDocument($filename);
     push @main::openfiles, $fsfile;
     SetCurrentFileList($fl->name);
     ResumeFile($fsfile);
@@ -967,7 +969,7 @@ sub attr_validate_hook {
 
 sub attr_choices_hook {
   my ($attr_path,$node,undef,$editor)=@_;
-  return unless UNIVERSAL::isa($node,'FSNode');
+  return unless UNIVERSAL::DOES::does($node,'Treex::PML::Node');
   if ($node->{'#name'} eq 'ref' and $attr_path eq 'target') {
     return [
       grep { defined && length }
@@ -989,7 +991,7 @@ sub attr_choices_hook {
 	return @res ? \@res : ();
       }
     } elsif ($attr_path eq 'b') {
-      if (UNIVERSAL::isa($SEARCH,'Tree_Query::SQLSearch')) {
+      if (UNIVERSAL::DOES::does($SEARCH,'Tree_Query::SQLSearch')) {
 	my $name = $editor->get_current_value('a');
 	if ($name and $name=~m{^(?:\$[[:alpha:]_][[:alnum:]_/\-]*\.)?([[:alpha:]_][[:alnum:]_/\-]*)$}) {
 	  my $attr = $1;
@@ -1632,7 +1634,7 @@ sub get_value_line_hook {
   init_id_map($tree);
   return $VALUE_LINE_MODE == 0 ?
     make_string_with_tags(tq_serialize($tree,{arrow_colors=>\%color}),[]) :
-      UNIVERSAL::isa($SEARCH,'Tree_Query::SQLSearch') ? 
+      UNIVERSAL::DOES::does($SEARCH,'Tree_Query::SQLSearch') ? 
 	  ($SEARCH->{evaluator} ? $SEARCH->{evaluator}->build_sql($tree,{format=>1})
 	     : 'NO EVALUATOR')
 	     : 'PLEASE SELECT SQL SEARCH';
@@ -1707,7 +1709,7 @@ sub current_node_change_hook {
 
 sub _rel_name {
   my ($rel,$fmt)=@_;
-  ($rel)=SeqV($rel) if ref($rel) eq 'Fslib::Seq';
+  ($rel)=SeqV($rel) if UNIVERSAL::DOES::does($rel, 'Treex::PML::Seq');
   return unless ref $rel;
   $fmt ||= q{%s:%s};
   my $rel_name = $rel->name;
@@ -2059,7 +2061,7 @@ sub Search {
     $this=$non_node->parent if $non_node;
   }
 
-  if (UNIVERSAL::isa($SEARCH,'Tree_Query::SQLSearch')) {
+  if (UNIVERSAL::DOES::does($SEARCH,'Tree_Query::SQLSearch')) {
     $SEARCH->search_first({%$opts});
   } else {
     $SEARCH->search_first($opts);
@@ -2387,13 +2389,13 @@ sub _find_type_in_query_string {
 
   if ($context =~ /(${variable_re})\.$/) {
     $var = $1;
-    if (($context.$rest) =~ m{^(.*)\bmember(?:\s+|\s*::\s*)?(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)\s+\Q$var\E\s*:=\s*\[}s) {
+    if (($context.$rest) =~ m{^(.*)\bmember(?:\s+|\s*::\s*)?(${Treex::PML::Schema::CDATA::Name}(?:/${Treex::PML::Schema::CDATA::Name})*)\s+\Q$var\E\s*:=\s*\[}s) {
       $type = $2;
       my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
       $type = $prec.'/'.$type
-    } elsif (($context.$rest)=~/(?:(${user_defined}${relation_re})${rel_length_re}(?:\s+|\s*::\s*))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+    } elsif (($context.$rest)=~/(?:(${user_defined}${relation_re})${rel_length_re}(?:\s+|\s*::\s*))?(${Treex::PML::Schema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
       $type = $2;
-    } elsif (($context.$rest)=~/(?:(${pmlrf_re})${rel_length_re}?(?:\s+|\s*->\s*))?(${PMLSchema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
+    } elsif (($context.$rest)=~/(?:(${pmlrf_re})${rel_length_re}?(?:\s+|\s*->\s*))?(${Treex::PML::Schema::CDATA::Name})\s+\Q$var\E\s*:=\s*\[/) {
       $type = $2;
     }
   } else {
@@ -2411,13 +2413,13 @@ sub _find_type_in_query_string {
     }
     return unless $context =~ /\S/;
     $context=reverse $context;
-    if ($context =~ m{^(.*)\bmember\s+(${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)(?:\s+|$)(?:(${variable_re})\s*:=)?$}s) {
+    if ($context =~ m{^(.*)\bmember\s+(${Treex::PML::Schema::CDATA::Name}(?:/${Treex::PML::Schema::CDATA::Name})*)(?:\s+|$)(?:(${variable_re})\s*:=)?$}s) {
       $type = $2;
       my ($prec) = _find_type_in_query_string($1,substr($context.$rest,length($1)));
       $type = $prec.'/'.$type
-    } elsif ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|\s*::\s*))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+    } elsif ($context =~ /(?:(${user_defined}${relation_re})(?:\s+|\s*::\s*))?(?:(${Treex::PML::Schema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
       $type = $2;
-    } elsif ($context =~ /(?:(${pmlrf_re})(?:\s+|\s*->\s*))?(?:(${PMLSchema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
+    } elsif ($context =~ /(?:(${pmlrf_re})(?:\s+|\s*->\s*))?(?:(${Treex::PML::Schema::CDATA::Name})(?:\s+|$))(?:(${variable_re})\s*:=)?$/) {
       $type = $2;
     }
   }
@@ -2431,7 +2433,7 @@ sub _editor_offer_values {
   my $eq;
   if ($SEARCH) {
     if ($context=~s{(?:(${variable_re}\.)?
-                       (${PMLSchema::CDATA::Name}(?:/${PMLSchema::CDATA::Name})*)|
+                       (${Treex::PML::Schema::CDATA::Name}(?:/${Treex::PML::Schema::CDATA::Name})*)|
                        (name)\(\s*(${variable_re})?\s*\)
                     )
                     ((?:\s*!?\s*=?|\s*!\s*in|\s+in)\s*)$
@@ -3447,9 +3449,9 @@ sub resolve_pmlref {
     my ($file_id,$id)=($1,$2);
     my $refs = $fsfile->appData('ref');
     my $reffile = $refs && $refs->{$file_id};
-    if (UNIVERSAL::isa($reffile,'FSFile')) {
+    if (UNIVERSAL::DOES::does($reffile,'Treex::PML::Document')) {
       return PML::GetNodeByID($id,$reffile);
-    } elsif (UNIVERSAL::isa($reffile,'PMLInstance')) {
+    } elsif (UNIVERSAL::DOES::does($reffile,'Treex::PML::Instance')) {
       return $reffile->lookup_id($id);
     }
   } elsif ($ref=~m{\#?([^#]+)}) {
@@ -3462,7 +3464,7 @@ sub member_to_pmltq {
   my ($name, $val, $type, $indent, $fsfile, $opts)=@_;
   my $out;
   my $mtype = $name eq 'content()' ? $type : $type->get_knit_content_decl;
-  if ($mtype->get_decl_type == PML_ALT_DECL and !UNIVERSAL::isa($val,'Fslib::Alt')) {
+  if ($mtype->get_decl_type == PML_ALT_DECL and !UNIVERSAL::DOES::does($val,'Treex::PML::Alt')) {
     $mtype = $mtype->get_knit_content_decl;
   }
   if (not ref($val)) {
@@ -3490,7 +3492,7 @@ sub member_to_pmltq {
 	$out.=qq{$name = }._pmltq_string($val).qq{,\n};
       }
     }
-  } elsif (UNIVERSAL::isa($val,'Fslib::List')) {
+  } elsif (UNIVERSAL::DOES::does($val,'Treex::PML::List')) {
     if ($mtype->is_ordered) {
       my $i=1;
       foreach my $v (@$val) {
@@ -3502,11 +3504,11 @@ sub member_to_pmltq {
 	$out.=member_to_pmltq($name,$v,$mtype,$indent,$fsfile,$opts);
       }
     }
-  } elsif (UNIVERSAL::isa($val,'Fslib::Alt')) {
+  } elsif (UNIVERSAL::DOES::does($val,'Treex::PML::Alt')) {
     foreach my $v (@$val) {
       $out.=member_to_pmltq($name,$v,$mtype,$indent,$fsfile,$opts);
     }
-  } elsif (UNIVERSAL::isa($val,'Fslib::Struct') or UNIVERSAL::isa($val,'Fslib::Container')) {
+  } elsif (UNIVERSAL::DOES::does($val,'Treex::PML::Struct') or UNIVERSAL::DOES::does($val,'Treex::PML::Container')) {
     $out.=$indent.qq{member $name \[\n};
     foreach my $attr ($mtype->get_normal_fields) {
       my $m = $mtype->get_member_by_name($attr);
@@ -3523,7 +3525,7 @@ sub member_to_pmltq {
       $out.=member_to_pmltq($n,$v,$m,$indent.'  ',$fsfile,$opts);
     }
     $out.=$indent.qq{],\n}
-  } elsif (UNIVERSAL::isa($val,'Fslib::Seq')) {
+  } elsif (UNIVERSAL::DOES::does($val,'Treex::PML::Seq')) {
     my $i=1;
     foreach my $v ($val->elements) {
       my $n = $v->name;

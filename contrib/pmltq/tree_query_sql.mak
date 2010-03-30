@@ -364,7 +364,7 @@ sub init {
   return unless $id;
   my $cfg;
   if ($id eq ' CREATE NEW CONNECTION ') {
-    $cfg = Fslib::Struct->new();
+    $cfg = Treex::PML::Factory->createStructure();
     GUI() && EditAttribute($cfg,'',$cfg_type) || return;
     $cfgs->push_element('dbi',$cfg);
     $self->{config}{pml}->save();
@@ -531,16 +531,16 @@ sub load_config_file {
 				$config_file ne $self->{config}{pml}->get_filename)) {
     if ($config_file) {
       die "Configuration file '$config_file' does not exist!" unless -f $config_file;
-      $self->{config}{pml} = PMLInstance->load({ filename=>$config_file });
+      $self->{config}{pml} = Treex::PML::Instance->load({ filename=>$config_file });
     } else {
       $config_file ||= FindInResources('treebase.conf');
       if (-f $config_file) {
-	$self->{config}{pml} = PMLInstance->load({ filename=>$config_file });
+	$self->{config}{pml} = Treex::PML::Instance->load({ filename=>$config_file });
       } else {
 	my $tred_d = File::Spec->catfile($ENV{HOME},'.tred.d');
 	mkdir $tred_d unless -d $tred_d;
 	$config_file = File::Spec->catfile($tred_d,'treebase.conf');
-	$self->{config}{pml} = PMLInstance->load({ string => $DEFAULTS{dbi_config},
+	$self->{config}{pml} = Treex::PML::Instance->load({ string => $DEFAULTS{dbi_config},
 					      filename=> $config_file});
 	$self->{config}{pml}->save();
       }

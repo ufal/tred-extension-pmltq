@@ -9,8 +9,8 @@ use Benchmark;
 
 use lib qw(/home/pajas/tred-devel/tredlib/libs/pml-base);
 use lib qw(/home/pajas/tred-devel/tredlib/libs/fslib);
-use Fslib;
-use PMLSchema;
+use Treex::PML;
+use Treex::PML::Schema;
 
 use FindBin;
 use lib $FindBin::RealBin;

@@ -87,7 +87,7 @@ sub reduce_similar_siblings {
     ChangingFile(1);
     $first->set_type(undef);
     $first->{'#name'} = 'subquery';
-    $first->{occurrences}=Fslib::Struct->new({min => @{$c{$k}}+1});
+    $first->{occurrences}=Treex::PML::Factory->createStructure({min => @{$c{$k}}+1});
     DetermineNodeType($first);
     DeleteSubtree($_) for @{$c{$k}};
   }
@@ -134,7 +134,7 @@ sub reduce_optional_node_chain {
       CutPasteAfter($last,$subquery);
       AddOrRemoveRelations($subquery,$last,['descendant'],{ -add_only=>1 });
       SetRelation($subquery,'descendant');
-      $subquery->{occurrences}=Fslib::Struct->new({
+      $subquery->{occurrences}=Treex::PML::Factory->createStructure({
 	max => 0
        });
       my $not = NewSon($subquery);

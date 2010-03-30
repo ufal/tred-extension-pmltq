@@ -13,6 +13,8 @@ use Tree_Query::TrEd ();
 use Tree_Query::TypeMapper ();
 use Tree_Query::BtredEvaluator;
 
+use UNIVERSAL::DOES;
+
 use base qw(Tree_Query::TrEd Tree_Query::TypeMapper);
 
 use vars qw($DEBUG);
@@ -267,7 +269,7 @@ sub prepare_results {
 	}  @$wins;
       } elsif ($self->{file}) {
 	# find a window displaying the searched file
-	if (UNIVERSAL::isa($self->{file},'FSFile')) {
+	if (UNIVERSAL::DOES::does($self->{file},'Treex::PML::Document')) {
 	  $search_win = first { $_->{FSFile} == $self->{file} } @$wins;
 	} else {
 	  $search_win = first {
@@ -308,7 +310,7 @@ sub prepare_results {
 	  my $result_files = $self->{evaluator}->get_result_files;
 	  $self->{current_result} = [
 	    map {
-	      UNIVERSAL::isa($result->[$_],'FSNode') ? ThisAddress($result->[$_],$result_files->[$_]) : undef
+	      UNIVERSAL::DOES::does($result->[$_],'Treex::PML::Node') ? ThisAddress($result->[$_],$result_files->[$_]) : undef
 	    } 0..$#$result
 	   ];
 	} else {

@@ -12,4 +12,7 @@
   <description>Provides graphical interface for PML-TQ, which is a system for querying over
   treebanks or local files with a powerful query language.
   </description>
+  <require>
+    <tred min_version="1.4375"/>
+  </require>
 </tred_extension>
