@@ -35,7 +35,7 @@ unless ($opts{info}) {
     die "Didn't find query $opts{'query-id'} in query file $opts{'query-pml-file'}!"
       unless $query;
   } elsif ($opts{'query-file'}) {
-    open my $fh, '<:utf8', $opts{'query-file'} || die "Cannot open query file ".$opts{'query-file'}.": $!\n";
+    open my $fh, '<:utf8', $opts{'query-file'} or die "Cannot open query file ".$opts{'query-file'}.": $!\n";
     local $/;
     $query = <$fh>;
     if ($opts{'query-id'}) {
@@ -83,7 +83,7 @@ sub init_search {
 	my $fh;
 	if ($opts{'filter-code-out'}) {
 	  if (!-f $opts{'filter-code-out'}) {
-	    open $fh, '>', $opts{'filter-code-out'} || die "Cannot open $opts{'filter-code-out'} for writing: $!\n";
+	    open $fh, '>', $opts{'filter-code-out'} or die "Cannot open $opts{'filter-code-out'} for writing: $!\n";
 	  }
 	} else {
 	  $fh=\*STDERR;
