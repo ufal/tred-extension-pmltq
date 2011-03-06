@@ -3273,6 +3273,8 @@ EOF
   $d->destroy;
 }
 
+=over 4
+
 =item nodes_to_pmltq([$node1, ...]);
 
 Returns a PMLTQ query based on the given nodes and their relations.
@@ -3539,4 +3541,7 @@ sub member_to_pmltq {
 
 
 } # use strict
+
+=back
+
 1;
