@@ -798,11 +798,11 @@ node: <?length($${id}) ? ' #{blue(}${id}#{)} ' : ''
 ?>#{darkblue}<?length($${name}) ? '$'.$${name}.' ' : '' ?>
 label:#{darkgreen}<?
   my $occ = Tree_Query::occ_as_text($this);
-  length $occ ? '#{-coords:n-10,n}#{-anchor:e}${occurrences='.$occ.'x}' : ""
+  length $occ ? '#{-coords:n-10,n}#{-anchor:e}${occurrences='.$occ.'x}' : q()
 ?><? $${optional} ? '#{-coords:n-10,n}#{-anchor:e}${optional=?}'  : q()
 ?>
 label:<?
-  $this->{overlapping} ? '#{darkgreen}#{-anchor:w}#{-coords:n+13,n}${overlapping=+}' : ()
+  $this->{overlapping} ? '#{darkgreen}#{-anchor:w}#{-coords:n+13,n}${overlapping=+}' : q()
 ?>
 
 node: #{brown(}${description}
