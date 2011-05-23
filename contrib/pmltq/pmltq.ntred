@@ -27,7 +27,8 @@ $optparser->getoptions(\%opts,
 my $query_file;	      # if used, we need the file persistently
 unless ($opts{info}) {
   if ($opts{'query-pml-file'}) {
-    $query_file = Treex::PML::Factory->createDocumentFromFile($opts{'query-pml-file'},[Backends()])
+    $query_file = Treex::PML::Factory->createDocumentFromFile($opts{'query-pml-file'}, {
+            backends => [Backends()] })
       or die "Failed to open PML query file: $opts{'query-pml-file'}!";
     $query = first {
       !$opts{'query-id'} or $_->{id} eq $opts{'query-id'}
