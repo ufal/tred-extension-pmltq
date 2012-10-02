@@ -5,7 +5,7 @@
   </head>
   <pkgname>pmltq</pkgname>
   <icon>icons/find.png</icon>
-  <repository href="http://ufal.mff.cuni.cz/~pajas/tred/extensions/"/>
+  <repository href="http://ufal.mff.cuni.cz/tred/extensions/core/" />
   <title>PML Tree Query Interface for TrEd</title>
   <version>1.82</version>
   <copyright year="2008">Petr Pajas</copyright>
