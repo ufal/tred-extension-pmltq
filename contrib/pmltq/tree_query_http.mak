@@ -183,6 +183,7 @@ sub search_first {
 		];
 #  unlink $tmp;
   close $tmp;
+
   $t1 = new Benchmark;
   print STDERR "Decoding results took ",timestr(timediff($t1,$t0)),"\n";
   my $matches = @$results;
@@ -256,23 +257,47 @@ sub map_nodes_to_query_pos {
   my ($self,$filename,$tree_number,$tree,$fsfile)=@_;
   return unless $self->{current_result};
   my $fn = $filename.'##'.($tree_number+1);
+  my $is_treex = $tree && $tree->isa('Treex::Core::Bundle');
   my @nodes = ($tree,$tree->descendants);
   my $r = $self->{current_result};
-  return {
-    map {
-      my @ret;
-      if (defined($_->[1])) {
-	if ($_->[1]=~/^\Q$fn\E\.([0-9]+)$/) {
-	  @ret=($nodes[$1] => $_->[0])
-	} elsif ($fsfile and $_->[1]=~/^\Q$filename\E#([^#0-9][^#]*)$/) {
-	  my $n = PML::GetNodeByID($1,$fsfile);
-	  @ret = ($n => $_->[0]) if $n;
-	}
-      }
-      @ret
-    } reverse # upper nodes first (optional nodes do not overwrite their parents)
-      map { [$_,$self->resolve_path($r->[$_])] } 0..$#$r
-  };
+
+  my %map;
+  for my $res (reverse # upper nodes first (optional nodes do not overwrite their parents)
+          map { [$_,$self->resolve_path($r->[$_])] } 0..(@$r-1) ) {
+    if (defined($res->[1])) {
+      eval {
+        my $result = $self->{results}->[$self->{current_result_no}];
+        my ($id) = $result->[$res->[0]] =~ m/@(.*)$/;
+        $map{$id} = $res->[0] if $id;
+      };
+    }
+  }
+  return \%map;
+
+  # use Data::Dumper;
+  # print Dumper($r);
+
+  # my %map;
+  # for my $res (reverse # upper nodes first (optional nodes do not overwrite their parents)
+  #        map { [$_,$self->resolve_path($r->[$_])] } 0..(@$r-1) ) {
+  #     if (defined($res->[1])) {
+  #         if ($is_treex) {
+  #             my $id;
+  #             eval {
+  #                 my $result = $self->{results}->[$self->{current_result_no}];
+  #                 ($id) = $result->[$res->[0]] =~ m/@(.*)$/;
+  #                 #$tree->get_document->get_node_by_id($id)
+  #             };
+  #             $map{$id} = $res->[0] if $id;
+  #         } elsif ($res->[1]=~/^\Q$fn\E\.([0-9]+)$/) {
+  #             $map{$nodes[$1]->{id}} = $res->[0] if $nodes[$1] and $nodes[$1]->{id};
+  #         } elsif ($fsfile and $res->[1]=~/^\Q$filename\E#([^#0-9][^#]*)$/) {
+  #             #my $n = PML::GetNodeByID($1,$fsfile);
+  #             $map{$1} = $res->[0] if $1;
+  #         }
+  #     }
+  # }
+  # return \%map;
 }
 
 sub node_index_in_last_query {

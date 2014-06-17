@@ -467,12 +467,13 @@ DeclareMinorMode 'Tree_Query_Results' => {
   post_hooks => {
     node_style_hook => sub {
       my ($node,$styles)=@_;
-      my $m=$Tree_Query::is_match{$node};
+      my $m=$Tree_Query::is_match{$node->{id}};
       if (first { $node==$_->[0] } @marked_nodes) {
 	AddStyle($styles,'Oval',-fill => 'orange');
 	AddStyle($styles,'Node',-addwidth=>4);
 	AddStyle($styles,'Node',-addheight=>4);
       } elsif (defined $m) {
+        #print STDERR "match: $m \n";
 	AddStyle($styles,'Oval',-fill => '#'.$Tree_Query::colors[$m]);
 	AddStyle($styles,'Node',-addwidth=>3);
 	AddStyle($styles,'Node',-addheight=>3);
@@ -504,8 +505,9 @@ DeclareMinorMode 'Tree_Query_Results' => {
 	my $m;
 	for my $item (@$vl) {
 	  for (@$item[1..$#$item]) {
-	    if (defined($m=$Tree_Query::is_match{$_})) {
-	      # print "match: $m $_\n";
+            my $key = ref $_ ? $_->{id} : $_;
+	    if (defined($m=$Tree_Query::is_match{$key})) {
+	      #print STDERR "match: $m $_\n";
 	      @$item = $item->[0],grep !/^-foreground => /, @$item[1..$#$item];
 	      push @$item,'-foreground => #'.$Tree_Query::colors[$m];
 	      last;
