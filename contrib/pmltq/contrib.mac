@@ -6,22 +6,22 @@
 
 #include <contrib/pml/PML.mak>
 
-#binding-context Tree_Query
+#binding-context PMLTQ
 
 #include "obsolete.inc"
 
 #include "tree_query.mak"
 
 #####include "tree_query_sql.mak"
-# package Tree_Query::SQLEvaluator; # so that it gets reloaded
+# package PMLTQ::SQLEvaluator; # so that it gets reloaded
 
-package Tree_Query::TrEdSearch; # so that it gets reloaded
-package Tree_Query::TypeMapper; # so that it gets reloaded
-package Tree_Query::TrEd; # so that it gets reloaded
-package Tree_Query::Common; # so that it gets reloaded
-package Tree_Query::NG2PMLTQ; # so that it gets reloaded
-package Tree_Query::BtredEvaluator; # so that it gets reloaded
-package Tree_Query::Planner; # so that it gets reloaded
+package PMLTQ::TrEdSearch; # so that it gets reloaded
+package PMLTQ::TypeMapper; # so that it gets reloaded
+package PMLTQ::TrEd; # so that it gets reloaded
+package PMLTQ::Common; # so that it gets reloaded
+package PMLTQ::NG2PMLTQ; # so that it gets reloaded
+package PMLTQ::BtredEvaluator; # so that it gets reloaded
+package PMLTQ::Planner; # so that it gets reloaded
 package PMLTQ::Relation; # so that it gets reloaded
 
 #include "tree_query_http.mak"

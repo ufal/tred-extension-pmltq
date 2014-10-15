@@ -2,7 +2,7 @@
 # -*- mode: cperl; coding: utf-8 -*-
 
 #encoding UTF-8
-#$Tree_Query_Btred::DEBUG=3;
+#$PMLTQ_Btred::DEBUG=3;
 
 package TredMacro;
 
@@ -47,8 +47,8 @@ unless ($opts{info}) {
   }
 
   if (!ref($query) and $opts{'netgraph-query'}) {
-    require Tree_Query::NG2PMLTQ;
-    $query = Tree_Query::NG2PMLTQ::ng2pmltq($query,{type=>$opts{'netgraph-query'}});
+    require PMLTQ::NG2PMLTQ;
+    $query = PMLTQ::NG2PMLTQ::ng2pmltq($query,{type=>$opts{'netgraph-query'}});
   }
 
   die "Query is empty!" unless $query;
@@ -58,7 +58,7 @@ unless ($opts{info}) {
     $filters='>> '.$filters unless $filters =~ /^\s*>>/;
     if (ref($query)) {
       $query->{'output-filters'}||=Treex::PML::Factory->createList();
-      push @{$query->{'output-filters'}},@{ Tree_Query::Common::parse_filters($filters) };
+      push @{$query->{'output-filters'}},@{ PMLTQ::Common::parse_filters($filters) };
       #    print Data::Dumper::Dumper($query->{'output-filters'});
     } elsif ($query) {
       $query .= $filters;
@@ -70,8 +70,8 @@ my $search;
 use Data::Dumper;
 
 sub init_search {
-  my $mapper = Tree_Query::TypeMapper->new({file=>CurrentFile()});
-  my $search = Tree_Query::BtredEvaluator->new($query, {
+  my $mapper = PMLTQ::TypeMapper->new({file=>CurrentFile()});
+  my $search = PMLTQ::BtredEvaluator->new($query, {
     type_mapper => $mapper,
     plan => 1,
   });
@@ -102,13 +102,13 @@ sub init_search {
 }
 
 
-# $Tree_Query_Btred::DEBUG = 1;
+# $PMLTQ_Btred::DEBUG = 1;
 my $info_only = $opts{info} ? 1 : 0;
 sub search {
   if ($info_only) {
     return if $info_only==2;
     $info_only = 2;
-    my $mapper = Tree_Query::TypeMapper->new({file=>CurrentFile()});
+    my $mapper = PMLTQ::TypeMapper->new({file=>CurrentFile()});
     if ($opts{info} eq 'node-types') {
       print map "$_\n", @{$mapper->get_node_types};
     } elsif ($opts{info} eq 'relations') {

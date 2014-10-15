@@ -10,13 +10,13 @@
 
 {
 
-package Tree_Query::SQLSearch;
+package PMLTQ::SQLSearch;
 use Benchmark;
 use Carp;
 use strict;
 use warnings;
 use Scalar::Util qw(weaken);
-use Tree_Query::SQLEvaluator;
+use PMLTQ::SQLEvaluator;
 
 BEGIN { import TredMacro  }
 
@@ -26,13 +26,13 @@ our %DEFAULTS = (
   timeout => 30,
 );
 
-$Tree_Query::SQLSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
+$PMLTQ::SQLSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
 
 sub new {
   my ($class,$opts)=@_;
   $opts||={};
   my $self = bless {
-    object_id =>  $Tree_Query::SQLSearchPreserve::object_id++,
+    object_id =>  $PMLTQ::SQLSearchPreserve::object_id++,
     evaluator => undef,
     config => {
       pml => $opts->{config_pml},
@@ -46,7 +46,7 @@ sub new {
   weaken($self->{callback}[1]);
   register_open_file_hook($self->{callback});
   my $ident = $self->identify;
-  (undef, $self->{label}) = Tree_Query::CreateSearchToolbar($ident);
+  (undef, $self->{label}) = PMLTQ::CreateSearchToolbar($ident);
   my $fn = $self->filelist_name;
   $self->{on_destroy} = MacroCallback(
     sub {
@@ -163,7 +163,7 @@ sub search_first {
       $fl->add_arrayref(0, \@files);
       my @context=($this,$root,$grp);
       CloseFileInWindow($res_win);
-      EnableMinorMode('Tree_Query_Results',$res_win);
+      EnableMinorMode('PMLTQ_Results',$res_win);
       $grp=$res_win;
       SetCurrentWindow($grp);
       SetCurrentStylesheet(STYLESHEET_FROM_FILE);
@@ -275,7 +275,7 @@ sub select_matching_node {
       $r=$r->following();
     }
     if ($r) {
-      EnableMinorMode('Tree_Query_Results',$win);
+      EnableMinorMode('PMLTQ_Results',$win);
       SetCurrentNodeInOtherWin($win,$r);
       CenterOtherWinTo($win,$r);
     }
@@ -309,7 +309,7 @@ sub reconfigure {
 sub get_schema_for_query_node {
   my ($self,$node)=@_;
   my $ev = $self->init_evaluator;
-  return $ev->get_schema($ev->get_schema_name_for(Tree_Query::Common::GetQueryNodeType($node)));
+  return $ev->get_schema($ev->get_schema_name_for(PMLTQ::Common::GetQueryNodeType($node)));
 }
 
 sub get_schema_for_type {
@@ -321,7 +321,7 @@ sub get_schema_for_type {
 sub get_type_decl_for_query_node {
   my ($self,$node)=@_;
   my $ev = $self->init_evaluator;
-  return $ev->get_decl_for(Tree_Query::Common::GetQueryNodeType($node));
+  return $ev->get_decl_for(PMLTQ::Common::GetQueryNodeType($node));
 }
 
 sub get_decl_for {
@@ -388,7 +388,7 @@ sub init {
 sub init_evaluator {
   my ($self)=@_;
   unless ($self->{evaluator}) {
-    $self->{evaluator} = Tree_Query::SQLEvaluator->new(undef,{connect => $self->{config}{data}});
+    $self->{evaluator} = PMLTQ::SQLEvaluator->new(undef,{connect => $self->{config}{data}});
   CONNECT: {
       eval {
 	$self->{evaluator}->connect;
@@ -506,7 +506,7 @@ sub open_pmltq {
   my @positions = $self->{evaluator}->idx_to_pos([split m{/}, $filename]);
   $self->{current_result}=\@positions;
   my ($node) = map { CurrentNodeInOtherWindow($_) }
-              grep { CurrentContextForWindow($_) eq 'Tree_Query' } TrEdWindows();
+              grep { CurrentContextForWindow($_) eq 'PMLTQ' } TrEdWindows();
   my $idx = Index($self->{last_query_nodes},$node);
   my $first = $positions[$idx||0];
   if (defined $first and length $first) {

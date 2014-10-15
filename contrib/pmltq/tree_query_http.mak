@@ -3,7 +3,7 @@
 ### HTTP interface to pmltq server
 ################
 
-#### TrEd interface to Tree_Query::Evaluator
+#### TrEd interface to PMLTQ::Evaluator
 {
 
 {
@@ -18,8 +18,8 @@ package TrEd::PMLTQ::UserAgent;
   }
 }
 
-package Tree_Query::HTTPSearch;
-use base qw(Tree_Query::TrEd);
+package PMLTQ::HTTPSearch;
+use base qw(PMLTQ::TrEd);
 use Benchmark;
 use Carp;
 use strict;
@@ -46,7 +46,7 @@ our %DEFAULTS = (
   timeout => 30,
 );
 
-$Tree_Query::HTTPSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
+$PMLTQ::HTTPSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
 # my $ua = $Treex::PML::IO::lwp_user_agent;
 #$ua = Treex::PML::IO::UserAgent->new;
 #$ua->agent("TrEd/1.0 ");
@@ -55,7 +55,7 @@ sub new {
   my ($class,$opts)=@_;
   $opts||={};
   my $self = bless {
-    object_id =>  $Tree_Query::HTTPSearchPreserve::object_id++,
+    object_id =>  $PMLTQ::HTTPSearchPreserve::object_id++,
     config => {
       pml => $opts->{config_pml},
     },
@@ -69,7 +69,7 @@ sub new {
   my $ident = $self->identify;
   {
     my $tb;
-    ($tb, $self->{label}) = Tree_Query::CreateSearchToolbar($ident);
+    ($tb, $self->{label}) = PMLTQ::CreateSearchToolbar($ident);
     $tb->Label(-text=>"Timeout:")->pack(-side=>'left',-padx=>10);
     my $b = $tb->Spinbox(
       -background=>'white',
@@ -128,8 +128,8 @@ sub search_first {
   my $query = $self->{query} = $opts->{query} || $root;
   my $query_id = (ref($query) && $query->{id}) || '';
 
-  $self->{last_query_nodes} = [Tree_Query::Common::FilterQueryNodes($query)];
-  $query = Tree_Query::Common::as_text($query,{
+  $self->{last_query_nodes} = [PMLTQ::Common::FilterQueryNodes($query)];
+  $query = PMLTQ::Common::as_text($query,{
     resolve_types=>1,
     no_filters => $opts->{no_filters},
   }) if ref($query);
@@ -198,27 +198,27 @@ sub search_first {
 				$how_many,
 				'Display','Save to File','Cancel');
 	if ($ans eq 'Save to File') {
-	  Tree_Query::SaveResults($results,$query_id);
+	  PMLTQ::SaveResults($results,$query_id);
 	  return $results;
 	} elsif ($ans eq 'Cancel') {
 	  return $results;
 	}
       }
-      Tree_Query::ShowResultTable("Results ($how_many)",$results,$query_id);
+      PMLTQ::ShowResultTable("Results ($how_many)",$results,$query_id);
       return;
     }
     {
       $self->update_label('Preparing results ...');
-      my @wins = grep { IsMinorModeEnabled('Tree_Query_Results',$_) } TrEdWindows();
+      my @wins = grep { IsMinorModeEnabled('PMLTQ_Results',$_) } TrEdWindows();
       unless (@wins>0) {
 	@wins = (SplitWindowVertically({no_init => 1, no_redraw=>1,no_focus=>0}));
-	EnableMinorMode('Tree_Query_Results',$wins[0]);
+	EnableMinorMode('PMLTQ_Results',$wins[0]);
       }
       $self->{results}=$results;
       $self->{current_result_no}=0;
       my $cur_res = $self->{current_result}=[$self->idx_to_pos($results->[0])];
       for my $win (@wins) {
-	SetMinorModeData('Tree_Query_Results','index',undef,$win);
+	SetMinorModeData('PMLTQ_Results','index',undef,$win);
       }
       my @context=($this,$root,$grp);
       for my $res_win (@wins) {
@@ -330,7 +330,7 @@ sub select_matching_node {
       undef $r unless ($win->{Nodes} and first { $_ == $r } @{$win->{Nodes}});
     }
     if ($r) {
-      EnableMinorMode('Tree_Query_Results',$win);
+      EnableMinorMode('PMLTQ_Results',$win);
       SetCurrentNodeInOtherWin($win,$r);
       CenterOtherWinTo($win,$r);
     }
@@ -372,7 +372,7 @@ sub reconfigure {
 
 sub get_schema_for_query_node {
   my ($self,$node)=@_;
-  my $type = Tree_Query::Common::GetQueryNodeType($node);
+  my $type = PMLTQ::Common::GetQueryNodeType($node);
   return $self->get_schema($self->get_schema_name_for($type));
 }
 
@@ -383,13 +383,13 @@ sub get_schema_for_type {
 
 sub get_type_decl_for_query_node {
   my ($self,$node)=@_;
-  return $self->get_decl_for(Tree_Query::Common::GetQueryNodeType($node));
+  return $self->get_decl_for(PMLTQ::Common::GetQueryNodeType($node));
 }
 
 sub get_decl_for {
   my ($self,$type)=@_;
   return unless $type or $type=~/:\*$/;
-  return $self->{type_decls}{$type} ||= Tree_Query::Common::QueryTypeToDecl($type,$self->get_schema($self->get_schema_name_for($type)));
+  return $self->{type_decls}{$type} ||= PMLTQ::Common::QueryTypeToDecl($type,$self->get_schema($self->get_schema_name_for($type)));
 }
 
 sub get_user_defined_relations {

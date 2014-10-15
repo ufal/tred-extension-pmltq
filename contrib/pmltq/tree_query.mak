@@ -2,7 +2,7 @@
 
 #include <contrib/pml/PML.mak>
 
-package Tree_Query;
+package PMLTQ;
 {
 use strict;
 
@@ -18,8 +18,8 @@ use Benchmark ':hireswallclock';
 
 use lib CallerDir();
 
-use Tree_Query::Common qw(:all);
-use Tree_Query::NG2PMLTQ qw(ng2pmltq);
+use PMLTQ::Common qw(:all);
+use PMLTQ::NG2PMLTQ qw(ng2pmltq);
 
 use UNIVERSAL::DOES;
 
@@ -32,12 +32,12 @@ register_reload_macros_hook(sub{
   undef $SEARCH;
 });
 
-Bind 'Tree_Query->NewQuery' => {
+Bind 'PMLTQ->NewQuery' => {
   context => 'TredMacro',
   key => 'Shift+F3',
   menu => '__* Start Tree Query',
 };
-Bind 'Tree_Query->NewQuery' => {
+Bind 'PMLTQ->NewQuery' => {
   key => 'Shift+F3',
   menu => '__* Start Tree Query',
 };
@@ -453,7 +453,7 @@ EOF
   },
  );
 
-DeclareMinorMode 'Tree_Query_Results' => {
+DeclareMinorMode 'PMLTQ_Results' => {
   abbrev => 'reslt',
   priority_bindings => {
     'n' => sub { $SEARCH && $SEARCH->show_next_result; ChangingFile(0); },
@@ -467,14 +467,14 @@ DeclareMinorMode 'Tree_Query_Results' => {
   post_hooks => {
     node_style_hook => sub {
       my ($node,$styles)=@_;
-      my $m=$Tree_Query::is_match{$node->{id}};
+      my $m=$PMLTQ::is_match{$node->{id}};
       if (first { $node==$_->[0] } @marked_nodes) {
 	AddStyle($styles,'Oval',-fill => 'orange');
 	AddStyle($styles,'Node',-addwidth=>4);
 	AddStyle($styles,'Node',-addheight=>4);
       } elsif (defined $m) {
         #print STDERR "match: $m \n";
-	AddStyle($styles,'Oval',-fill => '#'.$Tree_Query::colors[$m]);
+	AddStyle($styles,'Oval',-fill => '#'.$PMLTQ::colors[$m]);
 	AddStyle($styles,'Node',-addwidth=>3);
 	AddStyle($styles,'Node',-addheight=>3);
       }
@@ -506,10 +506,10 @@ DeclareMinorMode 'Tree_Query_Results' => {
 	for my $item (@$vl) {
 	  for (@$item[1..$#$item]) {
             my $key = ref $_ ? $_->{id} : $_;
-	    if (defined($m=$Tree_Query::is_match{$key})) {
+	    if (defined($m=$PMLTQ::is_match{$key})) {
 	      #print STDERR "match: $m $_\n";
 	      @$item = $item->[0],grep !/^-foreground => /, @$item[1..$#$item];
-	      push @$item,'-foreground => #'.$Tree_Query::colors[$m];
+	      push @$item,'-foreground => #'.$PMLTQ::colors[$m];
 	      last;
 	    }
 	  }
@@ -617,7 +617,7 @@ Bind sub { $SEARCH && $SEARCH->show_prev_result } => {
 
 Bind sub { RenewStylesheets(); $Redraw='stylesheet'; } => {
   key => 'y',
-  menu => 'Renew Tree_query Stylesheet',
+  menu => 'Renew PMLTQ Stylesheet',
   changing_file => 0,
 };
 
@@ -715,10 +715,10 @@ sub pre_switch_context_hook {
   my ($prev,$new,$win)=@_;
   return if $prev eq $new;
   return if $grp==$win and $grp!=CurrentWindow();
-  if (first { $win!=$_ and CurrentContextForWindow($_) eq 'Tree_Query' } TrEdWindows()) {
-    DisableUserToolbar('Tree_Query');
+  if (first { $win!=$_ and CurrentContextForWindow($_) eq 'PMLTQ' } TrEdWindows()) {
+    DisableUserToolbar('PMLTQ');
   } else {
-    DestroyUserToolbar('Tree_Query');
+    DestroyUserToolbar('PMLTQ');
   }
 }
 
@@ -726,17 +726,17 @@ sub pre_switch_context_hook {
 sub switch_context_hook {
  my ($prev,$new)=@_;
  CreateStylesheets();
- SetCurrentStylesheet('Tree_Query'),Redraw()
-   if GetCurrentStylesheet() ne 'Tree_Query'; #eq STYLESHEET_FROM_FILE();
+ SetCurrentStylesheet('PMLTQ'),Redraw()
+   if GetCurrentStylesheet() ne 'PMLTQ'; #eq STYLESHEET_FROM_FILE();
 
  if (exists &GetUserToolbar) {
- if (GetUserToolbar('Tree_Query')) {
-#    unless (UserToolbarVisible('Tree_Query')) {
-#      ShowUserToolbar('Tree_Query');
+ if (GetUserToolbar('PMLTQ')) {
+#    unless (UserToolbarVisible('PMLTQ')) {
+#      ShowUserToolbar('PMLTQ');
 #    }
-   EnableUserToolbar('Tree_Query');
+   EnableUserToolbar('PMLTQ');
  } else {
-   my $tb = NewUserToolbar('Tree_Query');
+   my $tb = NewUserToolbar('PMLTQ');
    my $frame = $tb->Frame()->pack(qw(-fill x));	#qw(-side top -expand 1 -fill both));
    $frame->packPropagate;
    for my $binding (@TOOLBAR_BINDINGS) {
@@ -777,16 +777,16 @@ sub switch_context_hook {
 # }
 
 sub RenewStylesheets {
-  DeleteStylesheet('Tree_Query');
+  DeleteStylesheet('PMLTQ');
   CreateStylesheets();
-  SetCurrentStylesheet('Tree_Query');
+  SetCurrentStylesheet('PMLTQ');
   SaveStylesheets();
 }
 
 sub CreateStylesheets{
-  unless(StylesheetExists('Tree_Query')){
-    SetStylesheetPatterns(<<'EOF','Tree_Query',1);
-context:  Tree_Query
+  unless(StylesheetExists('PMLTQ')){
+    SetStylesheetPatterns(<<'EOF','PMLTQ',1);
+context:  PMLTQ
 hint: 
 rootstyle:#{balance:1}#{Node-textalign:center}#{NodeLabel-halign:center}
 rootstyle: #{vertical:0}#{nodeXSkip:40}#{skipHiddenLevels:1}
@@ -799,7 +799,7 @@ node: <?length($${id}) ? ' #{blue(}${id}#{)} ' : ''
         ? $${node-type}.' ' : $root->{'node-type'} ? '#{brown(}${node-type='.$root->{'node-type'}.'}#{)}' : '#{red(}${node-type=AMBIGUOUS TYPE}#{)}' ) : () 
 ?>#{darkblue}<?length($${name}) ? '$'.$${name}.' ' : '' ?>
 label:#{darkgreen}<?
-  my $occ = Tree_Query::occ_as_text($this);
+  my $occ = PMLTQ::occ_as_text($this);
   length $occ ? '#{-coords:n-10,n}#{-anchor:e}${occurrences='.$occ.'x}' : q()
 ?><? $${optional} ? '#{-coords:n-10,n}#{-anchor:e}${optional=?}'  : q()
 ?>
@@ -814,7 +814,7 @@ node:<?
 ?>${a}${target}
 node:<?
   if (($this->{'#name'}=~/^(?:node|subquery)$/) and !$this->{'.unhide'} and !TredMacro::HiddenVisible() ) {
-    join("\n",map { Tree_Query::as_text($_,{indent=>'  ',wrap =>1,no_description=>1}) } 
+    join("\n",map { PMLTQ::as_text($_,{indent=>'  ',wrap =>1,no_description=>1}) } 
        grep {
 	my $f;
 	not(
@@ -824,7 +824,7 @@ node:<?
   } elsif ($this->{'#name'} eq 'test') {
     '${operator}'
   } elsif ($this->{'#name'} eq '' and !$this->parent) {
-     my $filters = Tree_Query::as_text($this,{no_childnodes=>1, indent=>'  ',wrap =>1,no_description=>1});
+     my $filters = PMLTQ::as_text($this,{no_childnodes=>1, indent=>'  ',wrap =>1,no_description=>1});
      $filters=~s/([ \t]*>>)/Output filters:\n$1/; $filters
   }
 ?>
@@ -833,12 +833,12 @@ style: <?
   my $name = $this->{'#name'};
   if ($this->parent->parent) {
     if ($name =~ /^(?:node|subquery|ref)$/) {
-      my $rel=Tree_Query::Common::rel_as_text($this) || 'child';
+      my $rel=PMLTQ::Common::rel_as_text($this) || 'child';
       my $hint = $rel;
-      my $dash = Tree_Query::arrow_dash($rel);
+      my $dash = PMLTQ::arrow_dash($rel);
       $rel=~s/{.*//;
-      my $color = Tree_Query::arrow_color($rel);
-      my $arrow = Tree_Query::arrow($rel);
+      my $color = PMLTQ::arrow_color($rel);
+      my $arrow = PMLTQ::arrow($rel);
       "#{Line-arrow:$arrow}#{Line-dash:$dash}#{Line-hint:$hint}".
       (defined($color) ? "#{Line-fill:$color}" : '').
       ($name eq 'ref' and defined($color) ? "#{Oval-outline:$color}#{Oval-fill:$color}" : '').
@@ -864,14 +864,14 @@ xlabel:<?
 ?>
 style:<?
    my $name = $this->{'#name'};
-   if ($name eq 'node' and Tree_Query::Common::IsMemberNode($this,$Tree_Query::SEARCH)) {
+   if ($name eq 'node' and PMLTQ::Common::IsMemberNode($this,$PMLTQ::SEARCH)) {
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-4,4,4,4,0,-4}' : '#{Node-shape:rectangle}' ).
      '#{Oval-fill:gray}#{Line-width:1}'
    } elsif ($name eq 'node'
       and !(grep { ($_->{'#name'}||'node') ne 'node' } $this->ancestors)) {
-     my $color = Tree_Query::NodeIndexInLastQuery($this);
+     my $color = PMLTQ::NodeIndexInLastQuery($this);
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
-     (defined($color) ? '#{Oval-fill:#'.$Tree_Query::colors[$color].'}' : '').
+     (defined($color) ? '#{Oval-fill:#'.$PMLTQ::colors[$color].'}' : '').
      '#{Line-arrowshape:14,20,4}'
    } elsif ($name eq 'node') {
     ( $this->{'.unhide'} ? '#{Node-shape:polygon}#{Node-polygon:-8,8,8,8,0,-8}' : '' ).
@@ -924,7 +924,7 @@ sub NewQuery {
     unless (-d main::dirname($filename)) {
       mkdir main::dirname($filename);
     }
-    my $fsfile = Tree_Query::Common::NewQueryDocument($filename);
+    my $fsfile = PMLTQ::Common::NewQueryDocument($filename);
     push @main::openfiles, $fsfile;
     SetCurrentFileList($fl->name);
     ResumeFile($fsfile);
@@ -944,7 +944,7 @@ sub NewQuery {
 
   ChangingFile(0);
   if ($opts->{new_search}) {
-    return _NewSearch(Tree_Query::TrEdSearch->new($opts->{new_search}),$opts->{preserve_search});
+    return _NewSearch(PMLTQ::TrEdSearch->new($opts->{new_search}),$opts->{preserve_search});
   } else {
     return SelectSearch() unless $opts->{no_select};
   }
@@ -993,11 +993,11 @@ sub attr_choices_hook {
 	return @res ? \@res : ();
       }
     } elsif ($attr_path eq 'b') {
-      if (UNIVERSAL::DOES::does($SEARCH,'Tree_Query::SQLSearch')) {
+      if (UNIVERSAL::DOES::does($SEARCH,'PMLTQ::SQLSearch')) {
 	my $name = $editor->get_current_value('a');
 	if ($name and $name=~m{^(?:\$[[:alpha:]_][[:alnum:]_/\-]*\.)?([[:alpha:]_][[:alnum:]_/\-]*)$}) {
 	  my $attr = $1;
-	  my $table = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+	  my $table = PMLTQ::Common::GetQueryNodeType($node,$SEARCH);
 	  return unless $table=~m{^[[:alpha:]_][[:alnum:]_/\-]*$};
 	  if ($attr=~s{^(.*)/}{}) {
 	    my $t=$1;
@@ -1066,7 +1066,7 @@ sub init_id_map {
   my %main_query_nodes;
   if (defined($assign_names) and $assign_names==1) {
     %main_query_nodes;
-    @main_query_nodes{ Tree_Query::Common::FilterQueryNodes($tree) } = ();
+    @main_query_nodes{ PMLTQ::Common::FilterQueryNodes($tree) } = ();
   }
   %id = map {
     my $n=$_->{name};
@@ -1146,7 +1146,7 @@ sub AssignRelation {
 
   my ($rel) = map _rel_name($_,'%2$s (%1$s)'), SeqV($node->{relation});
   my @sel=($rel||'child');
-  my $node_type = Tree_Query::Common::GetQueryNodeType($node->parent);
+  my $node_type = PMLTQ::Common::GetQueryNodeType($node->parent);
   my $relations = GetRelationTypes($node->parent,$SEARCH,1);
   if ($SEARCH && $node_type) {
     @$relations = grep {
@@ -1186,13 +1186,13 @@ sub AssignType {
   return 1 unless $SEARCH;
   return 1 if ( $node->parent && $node->{'#name'}!~/^(?:node|subquery)$/ );
   my @types;
-  if (Tree_Query::Common::IsMemberNode($node,$SEARCH)) {
+  if (PMLTQ::Common::IsMemberNode($node,$SEARCH)) {
     if ($SEARCH) {
-      my $ptype = Tree_Query::Common::GetQueryNodeType($node->parent,$SEARCH);
-      @types = Tree_Query::Common::GetMemberPaths($ptype, $SEARCH);
+      my $ptype = PMLTQ::Common::GetQueryNodeType($node->parent,$SEARCH);
+      @types = PMLTQ::Common::GetMemberPaths($ptype, $SEARCH);
     }
   } else {
-    @types = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+    @types = PMLTQ::Common::GetQueryNodeType($node,$SEARCH);
   }
   if (@types <= 1) {
     $node->{'node-type'} = $types[0];
@@ -1433,7 +1433,7 @@ sub root_style_hook {
   my @nodes = GetDisplayedNodes();
   my $hv = HiddenVisible();
   my $i=1;
-  %main_query = map { $_=>$i++ } Tree_Query::Common::FilterQueryNodes($root);
+  %main_query = map { $_=>$i++ } PMLTQ::Common::FilterQueryNodes($root);
   return if $no_legend;
   # icon('process-stop');
   for my $node (@nodes) {
@@ -1448,7 +1448,7 @@ sub root_style_hook {
 	  $node->children;
     }
     for my $n (@refs) {
-      my $rel=Tree_Query::Common::rel_as_text($n);
+      my $rel=PMLTQ::Common::rel_as_text($n);
       $rel||='child' if $n==$node;
       $rel=~s/{\d*,\d*}/{n,m} (transitive)/;
       next unless $rel;
@@ -1560,7 +1560,7 @@ sub node_style_hook {
   my $showHidden = $qn->{'.unhide'} || HiddenVisible();
   my $lw = $grp->treeView->get_lineWidth;
   $lw=2 if $lw<2;
-  my $is_member_node = Tree_Query::Common::IsMemberNode($node,$SEARCH);
+  my $is_member_node = PMLTQ::Common::IsMemberNode($node,$SEARCH);
   if ($main_query{$node}) {
     if ($is_member_node) {
       AddStyle($styles,'Node',
@@ -1602,7 +1602,7 @@ sub node_style_hook {
 	$name = $_->value->{label} if $name eq 'user-defined';
 	my $target = $ref->{target};
 	my $negate = ($node!=$ref && $ref->parent->{'#name'} eq 'not') ? 1 : 0;
-	my $text = Tree_Query::Common::rel_as_text($ref);
+	my $text = PMLTQ::Common::rel_as_text($ref);
 	my $color = $showHidden ? 'gray' : arrow_color($name);
 	$name = $text;
 	$name = '! '.$name if $negate;
@@ -1636,7 +1636,7 @@ sub get_value_line_hook {
   init_id_map($tree);
   return $VALUE_LINE_MODE == 0 ?
     make_string_with_tags(tq_serialize($tree,{arrow_colors=>\%color}),[]) :
-      UNIVERSAL::DOES::does($SEARCH,'Tree_Query::SQLSearch') ? 
+      UNIVERSAL::DOES::does($SEARCH,'PMLTQ::SQLSearch') ? 
 	  ($SEARCH->{evaluator} ? $SEARCH->{evaluator}->build_sql($tree,{format=>1})
 	     : 'NO EVALUATOR')
 	     : 'PLEASE SELECT SQL SEARCH';
@@ -1914,7 +1914,7 @@ sub isReversible {
   my ($node_type,$relation)=@_;
   my ($rel) = SeqV($relation);
   my $rel_name = _rel_name($rel);
-  my $reversed_name = Tree_Query::Common::reversed_relation($rel_name,$node_type);
+  my $reversed_name = PMLTQ::Common::reversed_relation($rel_name,$node_type);
   return $reversed_name || undef;
 }
 
@@ -1922,7 +1922,7 @@ sub ReverseRelation {
   my ($node_type,$relation)=@_;
   croak("Cannot call ReverseRelation() on undefined value") unless $relation;
   my ($rel)=SeqV($relation);
-  my $reversed_name = Tree_Query::Common::reversed_relation(_rel_name($rel),$node_type);
+  my $reversed_name = PMLTQ::Common::reversed_relation(_rel_name($rel),$node_type);
   if ($reversed_name) {
     if ($reversed_name=~s/^(user-defined|implementation|pmlrf)://) {
       $rel->set_name('user-defined');
@@ -1950,15 +1950,15 @@ sub EditRelationFromTo {
   my $node_type;
   my $relations;
   if ($type =~/^(?:node|subquery)$/) {
-    $node_type = Tree_Query::Common::GetQueryNodeType($node,$SEARCH);
+    $node_type = PMLTQ::Common::GetQueryNodeType($node,$SEARCH);
     $relations = GetRelationTypes($node,$SEARCH,0);
   } else {
     my $n = $node->parent;
     $n=$n->parent while $n->{'#name'} =~/^(?:node|subquery)$/;
-    $node_type = Tree_Query::Common::GetQueryNodeType($n,$SEARCH);
+    $node_type = PMLTQ::Common::GetQueryNodeType($n,$SEARCH);
     $relations = GetRelationTypes($n,$SEARCH,0);
   }
-  my $target_type = Tree_Query::Common::GetQueryNodeType($target,$SEARCH);
+  my $target_type = PMLTQ::Common::GetQueryNodeType($target,$SEARCH);
   if ($SEARCH && $node_type && $target_type) {
     @$relations = grep {
       first { $_ eq $target_type } @{[GetRelativeQueryNodeType($node_type, $SEARCH, CreateRelation($_))]}
@@ -2063,7 +2063,7 @@ sub Search {
     $this=$non_node->parent if $non_node;
   }
 
-  if (UNIVERSAL::DOES::does($SEARCH,'Tree_Query::SQLSearch')) {
+  if (UNIVERSAL::DOES::does($SEARCH,'PMLTQ::SQLSearch')) {
     $SEARCH->search_first({%$opts});
   } else {
     $SEARCH->search_first($opts);
@@ -2193,18 +2193,18 @@ sub SelectSearch {
   # my $S = GetSearch($sel);
   #  unless ($S) {
   if ($choice =~ /^Database/) {
-    $S=Tree_Query::SQLSearch->new();
+    $S=PMLTQ::SQLSearch->new();
   } elsif ($choice =~ /^Treebank/) {
-    $S=Tree_Query::HTTPSearch->new();
+    $S=PMLTQ::HTTPSearch->new();
   } elsif ($choice =~ /^File/) {
     if ($file=~s/^(\S+. )?File: //) {
-      $S=Tree_Query::TrEdSearch->new({file => $file, particular_trees=>$particular_trees, top_layer_only=>$top_layer_only});
+      $S=PMLTQ::TrEdSearch->new({file => $file, particular_trees=>$particular_trees, top_layer_only=>$top_layer_only});
     } elsif ($file=~s/^(\S+. )?List: //) {
       $file =~ s/ \([^\)]* files\)$//g;
-      $S=Tree_Query::TrEdSearch->new({filelist => $file, particular_trees=>$particular_trees, top_layer_only=>$top_layer_only});
+      $S=PMLTQ::TrEdSearch->new({filelist => $file, particular_trees=>$particular_trees, top_layer_only=>$top_layer_only});
     }
     #    } elsif ($choice =~ /^List/) {
-    #      $S=Tree_Query::TrEdSearch->new({filelist => $file});
+    #      $S=PMLTQ::TrEdSearch->new({filelist => $file});
   }
   if ($S) {
     _NewSearch($S,$preserve);
@@ -2385,9 +2385,9 @@ $rel_length_re='(?:\{[0-9]*,[0-9]*\})';
 sub _find_type_in_query_string {
   my ($context,$rest)=@_;
   my ($type,$var);
-  my $user_defined = Tree_Query::Common::user_defined_relations_re($SEARCH);
+  my $user_defined = PMLTQ::Common::user_defined_relations_re($SEARCH);
   $user_defined.='|' if length $user_defined;
-  my $pmlrf_re = Tree_Query::Common::pmlrf_relations_re($SEARCH);
+  my $pmlrf_re = PMLTQ::Common::pmlrf_relations_re($SEARCH);
 
   if ($context =~ /(${variable_re})\.$/) {
     $var = $1;
@@ -2444,11 +2444,11 @@ sub _editor_offer_values {
       $eq=$5;
       my ($type) = _find_type_in_query_string($context,
 					      $ed->get('insert','end'));
-      $type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$type if $qn && $type=~m{^/};
+      $type=PMLTQ::Common::GetQueryNodeType($qn->parent,$SEARCH).$type if $qn && $type=~m{^/};
       my $decl = $SEARCH->get_decl_for($type);
       my @values;
       if ($is_name) {
-	@values = @{Tree_Query::Common::GetElementNamesForDecl($decl)};
+	@values = @{PMLTQ::Common::GetElementNamesForDecl($decl)};
       } elsif ($decl and ($decl = $decl->find($attr))) {
 	my $decl_is = $decl->get_decl_type;
 	while ($decl_is == PML_ALT_DECL or
@@ -2558,7 +2558,7 @@ sub EditQuery {
 			my ($ed,$qn)=@_;
 			my ($node_type) = _find_type_in_query_string($ed->get('0.0','insert'),
 								     $ed->get('insert','end'));
-			$node_type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
+			$node_type=PMLTQ::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
 			my $relations;
 			if ($SEARCH and defined $node_type and length $node_type) {
 			  $relations =
@@ -2596,10 +2596,10 @@ sub EditQuery {
 			my $prev=$ed->get('0.0','insert');
 			my ($node_type) = _find_type_in_query_string($prev,
 								     $ed->get('insert','end'));
-			$node_type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
+			$node_type=PMLTQ::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
 			my $relation = 'child';
-			my $user_defined = Tree_Query::Common::user_defined_relations_re($SEARCH);
-			my $pmlrf_re = Tree_Query::Common::pmlrf_relations_re($SEARCH);
+			my $user_defined = PMLTQ::Common::user_defined_relations_re($SEARCH);
+			my $pmlrf_re = PMLTQ::Common::pmlrf_relations_re($SEARCH);
 			if ($prev=~/(${relation_re}|member)${rel_length_re}?\s*(?:::)?$/) {
 			  $relation = $1;
 			} elsif ($user_defined and $prev=~/(${user_defined})${rel_length_re}?\s*(?:::)?$/) {
@@ -2609,7 +2609,7 @@ sub EditQuery {
 			}
 			my @types;
 			if ($relation eq 'member') {
-			  @types = Tree_Query::Common::GetMemberPaths($node_type, $SEARCH);
+			  @types = PMLTQ::Common::GetMemberPaths($node_type, $SEARCH);
 			} elsif($node_type) {
 			  @types = GetRelativeQueryNodeType($node_type,$SEARCH,CreateRelation($relation));
 			} else {
@@ -2637,8 +2637,8 @@ sub EditQuery {
 			my $prev=$ed->get('0.0','insert');
 			my ($node_type) = _find_type_in_query_string($prev,
 								     $ed->get('insert','end'));
-			$node_type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
-			my @types = Tree_Query::Common::GetMemberPaths($node_type, $SEARCH);
+			$node_type=PMLTQ::Common::GetQueryNodeType($qn->parent,$SEARCH).$node_type if $node_type=~m{^/};
+			my @types = PMLTQ::Common::GetMemberPaths($node_type, $SEARCH);
 			if (@types==1) {
 			  $ed->Insert(' member '.$types[0].' [  ]');
 			  $ed->SetCursor('insert - 2 chars');
@@ -2693,11 +2693,11 @@ sub EditQuery {
 			 my ($type,$var) = _find_type_in_query_string($context,
 								      $ed->get('insert','end'));
 			 if (defined $type and length $type) {
-			   $type=Tree_Query::Common::GetQueryNodeType($qn->parent,$SEARCH).$type if $type=~m{^/};
+			   $type=PMLTQ::Common::GetQueryNodeType($qn->parent,$SEARCH).$type if $type=~m{^/};
 			   my $decl = $SEARCH->get_decl_for($type);
 			   if ($decl) {
 			     my @res = map { my $t = $_; $t=~s{#content}{content()}g; $t } $decl->get_paths_to_atoms({ no_childnodes => 1 });
-			     if (@{ Tree_Query::Common::GetElementNamesForDecl($decl) }) {
+			     if (@{ PMLTQ::Common::GetElementNamesForDecl($decl) }) {
 			       unshift @res, 'name()';
 			     }
 			     if (@res) {
@@ -2863,7 +2863,7 @@ sub EditQuery {
     #   print "parsing query took: $time\n";
     # }
     last unless $@;
-    if (ref($@) eq 'Tree_Query::ParserError' ) {
+    if (ref($@) eq 'PMLTQ::ParserError' ) {
       $qopts->{-cursor} = $@->line.'.end';
     }
     ErrorMessage("$@");
@@ -2880,13 +2880,13 @@ sub EditQuery {
 	$_->paste_after($node) for @$result;
 	DetermineNodeType($_) for map { ($_,$_->descendants) } @$result;
 	eval {
-	  Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$_) for @$result
+	  PMLTQ::Common::CompleteMissingNodeTypes($SEARCH,$_) for @$result
 	} if $SEARCH;
   	$result=$result->[0];
       } else {
 	$result->paste_after($node);
 	DetermineNodeType($_) for ($result,$result->descendants);
-	eval { Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$result) }
+	eval { PMLTQ::Common::CompleteMissingNodeTypes($SEARCH,$result) }
 	  if $SEARCH;
 	$result->{'.unhide'}=1 if $node->{'.unhide'};
       }
@@ -2899,7 +2899,7 @@ sub EditQuery {
       DeleteSubtree($_) for $node->children;
       CutPaste($_,$node) for reverse $result->children;
       DetermineNodeType($_) for ($node->descendants);
-      eval { Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$node) } if $SEARCH;
+      eval { PMLTQ::Common::CompleteMissingNodeTypes($SEARCH,$node) } if $SEARCH;
     }
     # {
     #   my $t1 = new Benchmark;
@@ -2956,7 +2956,7 @@ sub AddNode {
   }
   if ($new and $new->{'#name'} =~ /^(?:node|subquery)/) {
     my $ok = 1;
-#    if (Tree_Query::Common::IsMemberNode($node,$SEARCH)) {
+#    if (PMLTQ::Common::IsMemberNode($node,$SEARCH)) {
 #      SetRelation($new,'member');
 #      $ok=AssignType($new);
 #    } else {
@@ -3299,7 +3299,7 @@ sub _distill_query {
     eval {
       $qr->set_type(PML::Schema()->get_type_by_name('q-query.type')->get_content_decl);
       DetermineNodeType($_) for ($qr,$qr->descendants);
-      Tree_Query::Common::CompleteMissingNodeTypes($SEARCH,$qr) if $SEARCH;
+      PMLTQ::Common::CompleteMissingNodeTypes($SEARCH,$qr) if $SEARCH;
     };
     $TredMacro::nodeClipboard=$qr;
   };
@@ -3394,7 +3394,7 @@ sub node_to_pmltq {
   my $var = $opts->{id2name} && $opts->{id2name}{$node->{_id_member_name($node->type)}};
   $var = ' $'.$var.' := ' if $var;
 
-  $out .= Tree_Query::Common::DeclToQueryType($type).$var." [\n";
+  $out .= PMLTQ::Common::DeclToQueryType($type).$var." [\n";
   foreach my $attr ('#name',$type->get_normal_fields) {
     my $m = $type->get_member_by_name($attr);
     # next if $m and $m->get_role() eq '#ID';
@@ -3482,7 +3482,7 @@ sub member_to_pmltq {
 	} elsif ($is_pmlref) {
 	  my $target = resolve_pmlref($val,$fsfile);
 	  if ($target && $target->type) {
-	    $out.=$indent.'# '.$name.' '.Tree_Query::Common::DeclToQueryType( $target->type ).qq{ [ ],\n};
+	    $out.=$indent.'# '.$name.' '.PMLTQ::Common::DeclToQueryType( $target->type ).qq{ [ ],\n};
 	  } else {
 	    $out.=$indent.'# '.$name.qq{->[ ],\n};
 	  }

@@ -1,18 +1,18 @@
 # -*- cperl -*-
 {
-package Tree_Query_Btred;
+package PMLTQ_Btred;
 
 use strict;
-use Tree_Query::Common;
-use Tree_Query::TypeMapper;
-use Tree_Query::BtredEvaluator;
+use PMLTQ::Common;
+use PMLTQ::TypeMapper;
+use PMLTQ::BtredEvaluator;
 
 use vars qw($this $root $DEBUG);
 BEGIN {
   import TredMacro;
-  *DEBUG = \$Tree_Query::BtredEvaluator::DEBUG;
-  *ALL_SUBQUERIES_LAST = \$Tree_Query::BtredEvaluator::ALL_SUBQUERIES_LAST;
-  *ORDER_SIBLINGS=\$Tree_Query::BtredEvaluator::ORDER_SIBLINGS;
+  *DEBUG = \$PMLTQ::BtredEvaluator::DEBUG;
+  *ALL_SUBQUERIES_LAST = \$PMLTQ::BtredEvaluator::ALL_SUBQUERIES_LAST;
+  *ORDER_SIBLINGS=\$PMLTQ::BtredEvaluator::ORDER_SIBLINGS;
 }
 
 #ifdef TRED
@@ -41,7 +41,7 @@ sub init_search {
     die "Empty query\n" unless length $query;
     # FIXME: specific_relations
     my $type_mapper = $opts->{type_mapper};
-    $query_tree=Tree_Query::Common::parse_query($query,{
+    $query_tree=PMLTQ::Common::parse_query($query,{
       user_defined_relations => ($type_mapper && $type_mapper->get_user_defined_relations()),
       pmlrf_relations => ($type_mapper && $type_mapper->get_pmlrf_relations()),
     });
@@ -69,8 +69,8 @@ sub init_search {
 }
 
 sub new_evaluator {
-  $evaluator_opts->{type_mapper} ||= Tree_Query::TypeMapper->new({fsfile=>CurrentFile()});
-  Tree_Query::BtredEvaluator->new($query_tree, $evaluator_opts);
+  $evaluator_opts->{type_mapper} ||= PMLTQ::TypeMapper->new({fsfile=>CurrentFile()});
+  PMLTQ::BtredEvaluator->new($query_tree, $evaluator_opts);
 }
 
 sub next_match {
@@ -106,7 +106,7 @@ sub count_matches {
 #   my $query_tree=$root;
 #   my ($win) = grep {
 #     my $fl = GetCurrentFileList($_);
-#     ($fl and $fl->name eq 'Tree_Query')
+#     ($fl and $fl->name eq 'PMLTQ')
 #   } TrEdWindows();
 #   return unless $win;
 #   my $fsfile = CurrentFile($win);
@@ -116,18 +116,18 @@ sub count_matches {
 #     $grp=$win;
 #     eval {
 #       print STDERR "Searching...\n" if $DEBUG;
-#       $Tree_Query::btred_results=1;
-#       %Tree_Query::is_match=();
+#       $PMLTQ::btred_results=1;
+#       %PMLTQ::is_match=();
 #       my $one_tree = delete $opts->{one_tree};
 #       if ($one_tree) {
 # 	$opts->{tree}=$fsfile->tree(CurrentTreeNumber($win));
 #       }
 #       # $opts->{fsfile} = $fsfile;
-#       $evaluator = Tree_Query::BtredEvaluator->new($query_tree,$opts) if !$evaluator or $restart;
+#       $evaluator = PMLTQ::BtredEvaluator->new($query_tree,$opts) if !$evaluator or $restart;
 #       #  return;
 #       my $match = $evaluator->find_next_match();
 #       if ($match) {
-# 	%Tree_Query::is_match = map { $_ => 1 } @$match;
+# 	%PMLTQ::is_match = map { $_ => 1 } @$match;
 # 	print join(",",map { $_->{id}.": ".$_->{functor} } @$match)."\n";
 # 	SetCurrentNodeInOtherWindow($win,$match->[0]);
 #       }

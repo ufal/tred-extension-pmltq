@@ -1,4 +1,4 @@
-package Tree_Query::TrEd;
+package PMLTQ::TrEd;
 # pajas@ufal.mff.cuni.cz          24 úno 2009
 
 use 5.008;
@@ -57,11 +57,11 @@ sub show_result {
 	    if ($m and $m=~/^(([^#]+)(?:\#\#\d+|\#[^0-9#][^#]*))/g) {
 	      my $win = $seen->{$1}||$seen->{$2};
 	      if ($win) {
-		SetMinorModeData('Tree_Query_Results','index',$idx,$win);
+		SetMinorModeData('PMLTQ_Results','index',$idx,$win);
 		$seen->{$idx}=$win;
 	      } else {
 		$win=$wins[0];
-		SetMinorModeData('Tree_Query_Results','index',$idx,$win);
+		SetMinorModeData('PMLTQ_Results','index',$idx,$win);
 		$seen->{$idx}=$win;
 		$seen->{$1}=$win;
 		$seen->{$2}=$win;
@@ -73,12 +73,12 @@ sub show_result {
     $self->prepare_results($dir,\@wins);
     for my $win (@wins) {
       $grp=$win;
-      my $idx = GetMinorModeData('Tree_Query_Results','index');
+      my $idx = GetMinorModeData('PMLTQ_Results','index');
       local $win->{noRedraw}=1;
       my $result_fn;
       if (!defined($idx) or $idx>$#{$self->{current_result}}) {
 	$idx = $self->_assign_first_result_index_not_shown($seen,$win);
-	SetMinorModeData('Tree_Query_Results','index',$idx);
+	SetMinorModeData('PMLTQ_Results','index',$idx);
       }
       if (defined $idx) {
 	my $result_fn = $self->get_nth_result_filename($idx);
@@ -107,10 +107,10 @@ sub show_result {
 
 sub get_result_windows {
   my ($self)=@_;
-  my @wins = grep { IsMinorModeEnabled('Tree_Query_Results',$_) } TrEdWindows();
+  my @wins = grep { IsMinorModeEnabled('PMLTQ_Results',$_) } TrEdWindows();
   unless (@wins) {
     my $win = SplitWindowVertically();
-    EnableMinorMode('Tree_Query_Results',$win);
+    EnableMinorMode('PMLTQ_Results',$win);
     die $@ if $@;
     @wins=($win);
   }
@@ -123,7 +123,7 @@ sub _find_shown_result_indexes {
   my %seen;
   return unless $cur_res;
   for my $win (@$wins) {
-    my $idx = GetMinorModeData('Tree_Query_Results','index',$win);
+    my $idx = GetMinorModeData('PMLTQ_Results','index',$win);
     if (defined($idx) and $idx<@$cur_res) {
       my $m = $cur_res->[$idx];
       $seen{$idx}=$win;
@@ -139,7 +139,7 @@ sub _find_shown_result_indexes {
 sub _assign_first_result_index_not_shown {
   my ($self,$seen,$win)=@_;
   $win||=$grp;
-  $seen||=$self->_find_shown_result_indexes([ grep { IsMinorModeEnabled('Tree_Query_Results',$_) } TrEdWindows() ]);
+  $seen||=$self->_find_shown_result_indexes([ grep { IsMinorModeEnabled('PMLTQ_Results',$_) } TrEdWindows() ]);
   my $cur_res = $self->{current_result};
   return unless ref $cur_res and @$cur_res;
   # first try a specific file
@@ -185,15 +185,15 @@ __END__
 
 =head1 NAME
 
-Tree_Query::TrEd - common super-class for TrEd interfaces of Tree_Query search backends
+PMLTQ::TrEd - common super-class for TrEd interfaces of PMLTQ search backends
 
 =head1 SYNOPSIS
 
-   use Tree_Query::TrEd;
+   use PMLTQ::TrEd;
 
 =head1 DESCRIPTION
 
-This class contains methods that display results of a Tree_Query search object in TrEd.
+This class contains methods that display results of a PMLTQ search object in TrEd.
 It assumes the following methods and keys to be defined on the derived class:
 
   $self->{current_result}  # an array-ref of results
@@ -207,7 +207,7 @@ It assumes the following methods and keys to be defined on the derived class:
                                       # ($self->{current_result}[$n])
 
 
-It defines the following methods from the Tree_Query Search interface:
+It defines the following methods from the PMLTQ Search interface:
 
   $self->show_next_result;
   $self->show_prev_result;

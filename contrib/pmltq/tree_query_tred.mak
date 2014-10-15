@@ -2,42 +2,42 @@
 ############################################################
 {
 
-package Tree_Query::TrEdSearch;
+package PMLTQ::TrEdSearch;
 use Benchmark ':hireswallclock';
 use Carp;
 use strict;
 use warnings;
 BEGIN { import TredMacro  }
 
-use Tree_Query::TrEd ();
-use Tree_Query::TypeMapper ();
-use Tree_Query::BtredEvaluator;
+use PMLTQ::TrEd ();
+use PMLTQ::TypeMapper ();
+use PMLTQ::BtredEvaluator;
 
 use UNIVERSAL::DOES;
 
-use base qw(Tree_Query::TrEd Tree_Query::TypeMapper);
+use base qw(PMLTQ::TrEd PMLTQ::TypeMapper);
 
 use vars qw($DEBUG);
 BEGIN {
-  *DEBUG = \$Tree_Query::BtredEvaluator::DEBUG;
+  *DEBUG = \$PMLTQ::BtredEvaluator::DEBUG;
 }
 
 our $NO_PLANNING = 0;
 
-$Tree_Query::TrEdSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
+$PMLTQ::TrEdSearchPreserve::object_id=0; # different NS so that TrEd's reload-macros doesn't clear it
 
 sub new {
   my ($class,$opts)=@_;
   $opts||={};
   my $self = $class->SUPER::new($opts);
-  $self->{object_id} =  $Tree_Query::TrEdSearchPreserve::object_id++;
+  $self->{object_id} =  $PMLTQ::TrEdSearchPreserve::object_id++;
   $self->{$_} = undef for qw(evaluator query results); # create keys but leave undefined
   $self->{particular_trees} = $opts->{particular_trees};
   $self->{top_layer_only} = $opts->{top_layer_only};
 
   my $ident = $self->identify;
-  Tree_Query::CreateSearchToolbar($ident);
-  (undef, $self->{label}) = Tree_Query::CreateSearchToolbar($ident);
+  PMLTQ::CreateSearchToolbar($ident);
+  (undef, $self->{label}) = PMLTQ::CreateSearchToolbar($ident);
   $self->{on_destroy} = MacroCallback(sub {
 					DestroyUserToolbar($ident);
 					ChangingFile(0);
@@ -82,7 +82,7 @@ sub search_first {
   } if defined($DEBUG) and $DEBUG>3;
   my $query = $opts->{query} || $root;
   $self->{query}=$query;
-  my $evaluator = $self->{evaluator} = Tree_Query::BtredEvaluator->new($query,
+  my $evaluator = $self->{evaluator} = PMLTQ::BtredEvaluator->new($query,
 						      {
 							type_mapper => $self,
 							current_filelist => $self->{filelist} ? 1 : 0,
@@ -151,13 +151,13 @@ sub search_first {
 				$how_many,
 				'Display','Save to File','Cancel');
 	if ($ans eq 'Save to File') {
-	  Tree_Query::SaveResults($results,$query_id);
+	  PMLTQ::SaveResults($results,$query_id);
 	  return $results;
 	} elsif ($ans eq 'Cancel') {
 	  return $results;
 	}
       }
-      Tree_Query::ShowResultTable('Results ('.$how_many.')',
+      PMLTQ::ShowResultTable('Results ('.$how_many.')',
 				  $results,
 				  $query_id,
 				 );
@@ -197,7 +197,7 @@ sub _before_filelist_search {
     -borderwidth => 0,
     -takefocus=>0,
     -relief => $main::buttonsRelief,
-    -image => Tree_Query::icon('button_cancel'),
+    -image => PMLTQ::icon('button_cancel'),
     -compound => 'top',
    )->pack(-side=>'right',-padx => 5);
   $on_open = sub {
@@ -209,9 +209,9 @@ sub _before_filelist_search {
   };
   register_open_file_hook($on_open);
   my $orig_alarm = $SIG{ALRM};
-  my $orig_progress = $Tree_Query::BtredEvaluator::PROGRESS;
+  my $orig_progress = $PMLTQ::BtredEvaluator::PROGRESS;
   my $sig_update = sub {
-    $Tree_Query::BtredEvaluator::PROGRESS = undef;
+    $PMLTQ::BtredEvaluator::PROGRESS = undef;
     $time=time;
     ${$self->{label}}="Searching in file ".CurrentFileNo()." of ".$count."... ";
     $toolbar->update;
@@ -219,7 +219,7 @@ sub _before_filelist_search {
     return 1;
   };
   $SIG{ALRM} = sub {
-    $Tree_Query::BtredEvaluator::PROGRESS = $sig_update;
+    $PMLTQ::BtredEvaluator::PROGRESS = $sig_update;
   };
   alarm(2);
   return $self->{_aux}=[$on_open,$b,$orig_alarm,$orig_progress];
@@ -234,7 +234,7 @@ sub _after_filelist_search {
   } else {
     delete $SIG{ALRM};
   }
-  $Tree_Query::BtredEvaluator::PROGRESS = $self->{_aux}[3];
+  $PMLTQ::BtredEvaluator::PROGRESS = $self->{_aux}[3];
   unregister_open_file_hook($self->{_aux}[0]);
   my $b = $self->{_aux}[1];
   $b->packForget;
@@ -335,7 +335,7 @@ sub prepare_results {
       # print STDERR "result: $result, $err\n";
       die $err if $err;
       unless ($result) {
-	if ($Tree_Query::BtredEvaluator::STOP) {
+	if ($PMLTQ::BtredEvaluator::STOP) {
 	  QuestionQuery('TrEdSearch','Interrupted by user','OK');
 	} else {
 	  QuestionQuery('TrEdSearch','No more matches','OK');
@@ -356,7 +356,7 @@ sub prepare_results {
 
 sub get_result_windows {
   my ($self)=@_;
-  my @wins = grep { IsMinorModeEnabled('Tree_Query_Results',$_) } TrEdWindows();
+  my @wins = grep { IsMinorModeEnabled('PMLTQ_Results',$_) } TrEdWindows();
   if (!@wins) {
     if ($self->{file}) {
       @wins = map { $_->[0] } grep { $_->[1]->filename eq $self->{file} }
@@ -368,12 +368,12 @@ sub get_result_windows {
 	grep { $_ != $grp }
 	TrEdWindows();
     }
-    EnableMinorMode('Tree_Query_Results',$_) for @wins;
+    EnableMinorMode('PMLTQ_Results',$_) for @wins;
   }
   if (@wins) {
     return @wins;
   } else {
-    return $self->Tree_Query::TrEd::get_result_windows();
+    return $self->PMLTQ::TrEd::get_result_windows();
   }
 }
 
@@ -446,7 +446,7 @@ sub select_matching_node {
       undef $r unless ($win->{Nodes} and first { $_ == $r } @{$win->{Nodes}});
     }
     if ($r) {
-      EnableMinorMode('Tree_Query_Results',$win);
+      EnableMinorMode('PMLTQ_Results',$win);
       SetCurrentNodeInOtherWin($win,$r);
       $Redraw='none';
       Redraw($win);
