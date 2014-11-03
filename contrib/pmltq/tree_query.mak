@@ -1300,8 +1300,6 @@ sub RenameInExpression {
   return $val;
 }
 
-#include "ng.inc"
-
 # given to nodes or their IDs ($id and $ref)
 # returns 0 if both belong to the same subquery
 # returns 1 if $id is in a subquery nested in a subtree of $ref

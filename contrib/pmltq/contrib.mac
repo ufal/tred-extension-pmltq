@@ -8,8 +8,6 @@
 
 #binding-context PMLTQ
 
-#include "obsolete.inc"
-
 #include "tree_query.mak"
 
 #####include "tree_query_sql.mak"
