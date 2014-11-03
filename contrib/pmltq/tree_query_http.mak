@@ -33,10 +33,14 @@
   use Encode;
   use Treex::PML::Schema;
   use URI;
+  use JSON;
+
+  my $JSON = JSON->new->utf8;
+  my $API_VERSION = 'v1';
 
   use vars qw($VERSION $MIN_SERVER_VERSION);
-  $VERSION            = "0.2";
-  $MIN_SERVER_VERSION = "0.3";
+  $VERSION            = "0.3";
+  $MIN_SERVER_VERSION = "0.4";
   my $ua = $Treex::PML::IO::lwp_user_agent;    #TrEd::PMLTQ::UserAgent->new();
 
   #use LWP::UserAgent;
@@ -155,33 +159,20 @@
     }
     my $timeout = int( $opts->{timeout} || $self->{spinbox_timeout} )
       || $DEFAULTS{timeout};
-    my $t0 = new Benchmark;
-
-    my $tmp = File::Temp->new(
-      TEMPLATE => 'pmltq_XXXXX',
-      TMPDIR   => 1,
-      UNLINK   => 1,
-      SUFFIX   => '.txt'
-    );
     $self->update_label('Query in progress, please wait....');
     $self->{current_result} = undef;
-    my $res = $self->request(
+    my ($res, $content) = $self->request_api(
       query => [
         query     => $query,
-        format    => 'text',
         limit     => $limit,
         row_limit => $row_limit,
         timeout   => $timeout,
-      ],
-      $tmp->filename
+      ]
     );
-    binmode $tmp, ':utf8';
     $self->{limit} = $limit;
-    my $t1 = new Benchmark;
-    my $time = timestr( timediff( $t1, $t0 ) );
 
     unless ( $opts->{quiet} ) {
-      print STDERR "$query_id\t" . $self->identify . "\t$time\n";
+      print STDERR "$query_id\t" . $self->identify . "\n";
     }
     $self->update_label('');
     unless ( $res->is_success ) {
@@ -189,24 +180,14 @@
         ErrorMessage( "Error reported by PML-TQ server:\n\n" . $res->content . "\n" );
       }
       else {
-        ErrorMessage( $res->status_line . "\n" . $res->content . "\n" );
+        ErrorMessage( $content->{error} . "\n" );
       }
       return;
     }
-    $t0 = new Benchmark;
-    my $results = [
-      map { chomp; [ split /\t/, $_ ] }
-        <$tmp>
-    ];
 
-    #  unlink $tmp;
-    close $tmp;
-
-    $t1 = new Benchmark;
-    print STDERR "Decoding results took ", timestr( timediff( $t1, $t0 ) ), "\n";
-    my $matches = @$results;
+    my $matches = $content->{results};
     if ($matches) {
-      my $returns_nodes = $res->header('Pmltq-returns-nodes');
+      my $returns_nodes = $content->{names};
       $limit = $row_limit unless $returns_nodes;
       my $how_many
         = ( ( $limit and $matches == $limit ) ? '>=' : '' )
@@ -216,17 +197,17 @@
         ? ' match' . ( $matches > 1 ? 'es' : '' )
         : ' row' . ( $matches > 1 ? 's' : '' ) );
       unless ($returns_nodes) {
-        if ( @$results >= 1000 ) {
+        if ( @$matches >= 1000 ) {
           my $ans = QuestionQuery( 'Results', $how_many, 'Display', 'Save to File', 'Cancel' );
           if ( $ans eq 'Save to File' ) {
-            PMLTQ::SaveResults( $results, $query_id );
-            return $results;
+            PMLTQ::SaveResults( $matches, $query_id );
+            return $matches;
           }
           elsif ( $ans eq 'Cancel' ) {
-            return $results;
+            return $matches;
           }
         }
-        PMLTQ::ShowResultTable( "Results ($how_many)", $results, $query_id );
+        PMLTQ::ShowResultTable( "Results ($how_many)", $matches, $query_id );
         return;
       }
       {
@@ -237,10 +218,10 @@
           @wins = ( SplitWindowVertically( { no_init => 1, no_redraw => 1, no_focus => 0 } ) );
           EnableMinorMode( 'PMLTQ_Results', $wins[0] );
         }
-        $self->{results}           = $results;
+        $self->{results}           = $matches;
         $self->{current_result_no} = 0;
         my $cur_res = $self->{current_result}
-          = [ $self->idx_to_pos( $results->[0] ) ];
+          = [ $self->idx_to_pos( $matches->[0] ) ];
         for my $win (@wins) {
           SetMinorModeData( 'PMLTQ_Results', 'index', undef, $win );
         }
@@ -260,7 +241,7 @@
     else {
       QuestionQuery( 'Results', 'No results', 'OK' );
     }
-    return $results;
+    return $matches;
   }
 
   sub current_query {
@@ -369,19 +350,19 @@
 
   sub get_node_types {
     my ( $self, $schema_name ) = @_;
-    my $res = $self->request(
-      'nodetypes',
-      [ format => 'text',
-        ( defined($schema_name)
+    my ($res, $content) = $self->request_api(
+      'node-types',
+      [ ( defined($schema_name)
           ? ( layer => $schema_name )
           : ()
         ),
       ] );
     unless ( $res->is_success ) {
-      ErrorMessage( $res->status_line, "\n" );
+      ErrorMessage( $content->{error}, "\n" ) if $content;
+      ErrorMessage( $res->status_line, "\n" ) unless $content;
       return;
     }
-    return [ split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ];
+    return $content->{types};
   }
 
   sub configure {
@@ -431,33 +412,29 @@
       return $self->{type_user_defined_relations}{$type}
         if $self->{type_user_defined_relations}
         and $self->{type_user_defined_relations}{$type};
-      my $res = $self->request(
+      my ($res, $content) = $self->request_api(
         'relations',
-        [ format   => 'text',
-          category => 'implementation',
+        [ category => 'implementation',
           type     => $type,
         ] );
       unless ( $res->is_success ) {
         ErrorMessage( $res->status_line, "\n" );
         return [];
       }
-      return $self->{type_user_defined_relations}{$type}
-        = [ split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ];
+      return $self->{type_user_defined_relations}{$type} = $content->{relations};
     }
     else {
       return $self->{user_defined_relations}
         if $self->{user_defined_relations};
-      my $res = $self->request(
+      my ($res, $content) = $self->request_api(
         'relations',
-        [ format   => 'text',
-          category => 'implementation',
-        ] );
+        [ category => 'implementation' ] 
+      );
       unless ( $res->is_success ) {
         ErrorMessage( $res->status_line, "\n" );
         return [];
       }
-      return $self->{user_defined_relations}
-        = [ split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ];
+      return $self->{user_defined_relations} = $content->{relations};
     }
   }
 
@@ -467,32 +444,28 @@
       return $self->{type_pmlrf_relations}{$type}
         if $self->{type_pmlrf_relations}
         and $self->{type_pmlrf_relations}{$type};
-      my $res = $self->request(
+      my ($res, $content) = $self->request_api(
         'relations',
-        [ format   => 'text',
-          category => 'pmlrf',
+        [ category => 'pmlrf',
           type     => $type,
         ] );
       unless ( $res->is_success ) {
         ErrorMessage( $res->status_line, "\n" );
         return [];
       }
-      return $self->{type_pmlrf_relations}{$type}
-        = [ split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ];
+      return $self->{type_pmlrf_relations}{$type} = $content->{relations};
     }
     else {
       return $self->{pmlrf_relations} if $self->{pmlrf_relations};
-      my $res = $self->request(
+      my ($res, $content) = $self->request_api(
         'relations',
-        [ format   => 'text',
-          category => 'pmlrf',
+        [ category => 'pmlrf',
           ( defined($type) ? ( type => $type ) : () ) ] );
       unless ( $res->is_success ) {
         ErrorMessage( $res->status_line, "\n" );
         return [];
       }
-      return $self->{pmlrf_relations}
-        = [ split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ];
+      return $self->{pmlrf_relations} = $content->{relations};
     }
   }
 
@@ -502,21 +475,19 @@
       return $self->{type_specific_relations}{$type}
         if $self->{type_specific_relations}
         and $self->{type_specific_relations}{$type};
-      my $res = $self->request(
+      my ($res, $content) = $self->request_api(
         'relations',
-        [ format => 'text',
-          type   => $type,
-        ] );
+        [ type   => $type ] 
+      );
       unless ( $res->is_success ) {
         ErrorMessage( $res->status_line, "\n" );
         return [];
       }
-      return $self->{type_specific_relations}{$type}
-        = [ split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ];
+      return $self->{type_specific_relations}{$type} = $content->{relations};
     }
     else {
       return $self->{specific_relations} if $self->{specific_relations};
-      my $res = $self->request(
+      my ($res, $content) = $self->request_api(
         'relations',
         [ format => 'text',
           ( defined($type) ? ( type => $type ) : () ) ] );
@@ -524,8 +495,7 @@
         ErrorMessage( $res->status_line, "\n" );
         return [];
       }
-      return $self->{specific_relations}
-        = [ split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ];
+      return $self->{specific_relations} = $content->{relations};
     }
   }
 
@@ -543,10 +513,9 @@
     }
     my $rels = $self->{$map_name};
     unless ( $rels and $rels->{$node_type} ) {
-      my $res = $self->request(
-        'relation_target_types',
-        [ format   => 'text',
-          category => ( $category || '' ),
+      my ($res, $content) = $self->request_api(
+        'relation-target-types',
+        [ category => ( $category || '' ),
           type     => $node_type,
         ] );
       unless ( $res->is_success ) {
@@ -555,8 +524,8 @@
       }
       my $R = {};
       $self->{$map_name}{$node_type} = $R;
-      for my $line ( split /\r?\n/, Encode::decode_utf8( $res->content, 1 ) ) {
-        my ( $type, $rel, $target ) = split /:/, $line, 3;
+      for my $item ( @{$content->{map}} ) {
+        my ( $type, $rel, $target ) = @$item;
         $R->{$rel} = $target if $type eq $node_type;
       }
       return $R->{$relation};
@@ -595,17 +564,12 @@
     if ( $self->{schema_types}{$type} ) {
       return $self->{schema_types}{$type};
     }
-    my $res = $self->request(
-      'type',
-      [ type   => $type,
-        format => 'text'
-      ] );
+    my ($res, $content) = $self->request_api( 'type', [ type => $type ] );
     unless ( $res->is_success ) {
       die "Couldn't resolve schema name for type $type: " . $res->status_line . "\n";
     }
-    my $name = Encode::decode_utf8( $res->content, 1 );
-    $name =~ s/\r?\n$//;
-    return $self->{schema_types}{$type} = $name
+
+    return $self->{schema_types}{$type} = $content->{name}
       || die "Did not find schema name for type $type\n";
   }
 
@@ -615,46 +579,57 @@
     if ( $self->{schemas}{$name} ) {
       return $self->{schemas}{$name};
     }
-    my $res = $self->request( 'schema', [ name => $name, ] );
+    my ($res, $content) = $self->request_file( 'schema', [ name => $name ] );
     unless ( $res->is_success ) {
       die "Failed to obtain PML schema $name " . $res->status_line . "\n";
     }
-    return $self->{schemas}{$name} = Treex::PML::Schema->new( { string => Encode::decode_utf8( $res->content, 1 ) } )
+    return $self->{schemas}{$name} = Treex::PML::Schema->new( { string => $content } )
       || die "Failed to obtain PML schema $name\n";
   }
 
-  sub request {
+  sub request_api {
     my ( $self, $type, $data, $out_file ) = @_;
-    my $cfg = $self->{config}{data};
-    return _request( $cfg, $type, $data, $out_file );
+    
+    my $cfg  = $self->{config}{data};
+    my $url  = URI->new($cfg->{url});
+    my $name = $cfg->{name};
+    $url->path_segments($API_VERSION, 'treebanks', $name, $type);
+    print STDERR "$url\n";
+
+    my $res  = $self->request_server( $cfg, $url->as_string, $data, $out_file );
+    
+    if (!$out_file and wantarray)  {
+      my $json = $res->decoded_content;
+      use Data::Dumper;
+      print STDERR Dumper($json);
+      confess($json) unless ($res->is_success);
+      return ($res, $json ? $JSON->decode($json) : undef);
+    }
+    return $res;
   }
 
-  sub _request {
-    my ( $cfg, $type, $data, $out_file ) = @_;
+  sub request_file {
+    my ( $self, $type, $data, $out_file ) = @_;
+
+    my $res = $self->request_api( $type, $data, $out_file );
+    if (!$out_file and wantarray)  {
+      return ($res, $res->decoded_content);
+    }
+    return $res;
+  }
+
+  sub request_server {
+    my ( $self, $cfg, $url, $data, $out_file ) = @_;
+
     my $user     = $cfg->{username};
     my $password = $cfg->{password};
-    my $url      = $cfg->{url};
-    $url .= '/' unless $url =~ m{^https?://.+/};
-    if ( ref $data ) {
-      $data = [ map { Encode::_utf8_off($_); $_ } @$data ];
-    }
-    elsif ( defined $data ) {
-      Encode::_utf8_off($data);
-    }
-    Encode::_utf8_off($url);
-    Encode::_utf8_off($type);
 
-    #  $ua->set_cfg($cfg);
     $ua->credentials( URI->new($url)->host_port, 'PMLTQ', $user, $password )
       if ( grep { defined && length } $password, $user ) == 2;
-    my $res = eval { $ua->request( POST( qq{${url}${type}}, $data ), $out_file ? $out_file : () ); };
-    if ( $res and $res->is_error and $res->code == 401 ) {
 
-      # unauthorized
-      # Got authorization error 401, maybe the nonce is stale, let's try again...
-      $res = eval { $ua->request( POST( qq{${url}${type}}, $data ), $out_file ? $out_file : () ); };
-    }
+    my $res = eval { $ua->get( "${url}", @$data, $out_file ? (':content_file' => $out_file) : () ); };
     confess($@) if $@;
+    
     return $res;
   }
 
@@ -933,13 +908,9 @@
     my ( $self, $cfg, $show, $l ) = @_;
     my $top = $l ? $l->toplevel : ToplevelFrame();
     my $anchor = $l && $l->info('anchor');
-    my $res = _request(
-      $cfg, 'about',
-      [ client_version => $VERSION,
-        format         => 'text',
-      ] );
-    my $v = $res->is_success ? $res->content : undef;
-    unless ($v) {
+
+    my ($res, $content) = $self->request_server( 'metadata', [ client_version => $VERSION ] );
+    unless ($res->is_success) {
       ErrorMessage( "Failed to connect to server to retrieve basic information about the treebank:\n\n"
           . $res->status_line
           . "\n" );
@@ -947,11 +918,9 @@
         if $show and ref( $cfg->{cached_description} );
       return;
     }
-    $v =~ s/\n.*//;
-    my %s = map { split( ':', $_, 2 ) } split /\t/, $v;
-    if ( $s{service} ) {
-      $cfg->{url} = $s{service};
-      _update_cached_info( $self, $cfg, \%s );
+    if ( $content->{url} ) {
+      $cfg->{url} = $content->{url};
+      _update_cached_info( $self, $cfg, $content );
       $self->{config}{pml}->save();
       if ($anchor) {
 
@@ -967,7 +936,7 @@
   sub _update_cached_info {
     my ( $self, $cfg, $service_info ) = @_;
     $cfg->{cached_description} ||= Treex::PML::Factory->createStructure();
-    foreach my $key (qw(title abstract moreinfo)) {
+    foreach my $key (qw(title description homepage)) {
       $cfg->{cached_description}{$key} = $service_info->{$key};
     }
   }
@@ -1000,9 +969,9 @@
       -takefocus  => 1,
       -justify    => 'left'
     )->pack( -fill => 'x', -padx => 3 );
-    if ( $s->{abstract} ) {
+    if ( $s->{description} ) {
       $f->Label(
-        -text       => $s->{abstract},
+        -text       => $s->{description},
         -wraplength => '500p',
         -font       => 'C_normal',
         -foreground => 'black',
@@ -1010,15 +979,15 @@
         -justify    => 'left'
       )->pack( -fill => 'x', -padx => 3 );
     }
-    if ( $s->{moreinfo} ) {
+    if ( $s->{homepage} ) {
       my $link = $f->Label(
-        -text       => $s->{moreinfo},
+        -text       => $s->{homepage},
         -font       => 'C_small',
         -foreground => 'blue',
         -anchor     => 'ne',
         -justify    => 'right'
       );
-      $link->bind( $link, '<1>', [ sub { \&main::open_url_in_browser( $_[1] ) }, $s->{moreinfo} ] );
+      $link->bind( $link, '<1>', [ sub { \&main::open_url_in_browser( $_[1] ) }, $s->{homepage} ] );
       $link->pack( -fill => 'x', -padx => 3 );
     }
     $d->BindEscape();
@@ -1041,27 +1010,23 @@
     for my $c ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) ) {
       $enabled{ $c->{url} } = 1 if $c->{url};
     }
-    my $res = _request(
-      $cfg, 'other',
-      [ client_version => $VERSION,
-        format         => 'text',
-      ] );
+
+    my $url = URI->new($cfg->{url});
+    $url->path_segments($API_VERSION, 'treebanks');
+    my ($res, $content) = $self->request_server( $cfg, $url->as_string, [ client_version => $VERSION ] );
     unless ( $res->is_success ) {
       ErrorMessage( "Failed to connect to server:\n\n" . $res->status_line . "\n" );
       return;
     }
-    my $v = $res->content;
-    return unless $v;
     my @services;
     my %services;
-    for my $service ( split /\n/, $v ) {
-      my %s = map { split( ':', $_, 2 ) } split /\t/, $service;
-      if ( $s{service} ) {
-        push @services, ( $services{ $s{service} } = \%s );
-        if ( exists $s{access} ) {
+    for my $service ( @$content ) {
+      if ( $service->{url} ) {
+        push @services, ( $services{$service->{url}} = $service );
+        if ( exists $service->{access} ) {
 
           # deselect servers the user is not authorized to connect to
-          $enabled{ $s{service} } = 0 if $s{access} == 0;
+          $enabled{ $service->{url} } = 0 unless $service->{access};
         }
       }
     }
@@ -1099,7 +1064,7 @@
       );
       $f->bindtags( [ $f, ref($f), $f->toplevel, 'all' ] );
       my $b = $f->Checkbutton(
-        -variable => \$enabled{ $s->{service} },
+        -variable => \$enabled{ $s->{url} },
         -state    => (
           ( exists( $s->{access} ) and $s->{access} == 0 )
           ? 'disabled'
@@ -1119,10 +1084,10 @@
       )->pack( -fill => 'x', -padx => 3 );
       $b->bindtags( [ $b, ref($b), $b->toplevel, 'all' ] );
       push @b, $b;
-      if ( $s->{abstract} ) {
+      if ( $s->{description} ) {
         $f->Label(
           -background => $background,
-          -text       => $s->{abstract},
+          -text       => $s->{description},
           -wraplength => '500p',
           -font       => 'C_normal',
           -foreground => 'black',
@@ -1130,17 +1095,17 @@
           -justify    => 'left'
         )->pack( -fill => 'x', -padx => 3 );
       }
-      if ( $s->{moreinfo} ) {
+      if ( $s->{homepage} ) {
         my $link = $f->Label(
           -background => $background,
-          -text       => $s->{moreinfo},
+          -text       => $s->{homepage},
           -font       => 'C_small',
           -foreground => 'blue',
           -anchor     => 'ne',
           -justify    => 'right'
         );
         $is_link{$link} = 1;
-        $link->bind( $link, '<1>', [ sub { \&main::open_url_in_browser( $_[1] ) }, $s->{moreinfo} ] );
+        $link->bind( $link, '<1>', [ sub { \&main::open_url_in_browser( $_[1] ) }, $s->{homepage} ] );
         $link->pack( -fill => 'x', -padx => 3 );
       }
       $f->pack(
@@ -1261,12 +1226,13 @@
     }
     my $ids_ref;
     foreach my $s (@services) {
-      if ( $enabled{ $s->{service} } ) {
+      if ( $enabled{ $s->{url} } ) {
         my $new_id;
         ( $new_id, $ids_ref ) = $self->_new_cfg_id( $cfgs, undef, $ids_ref );
         my $c = Treex::PML::Factory->createStructure(
           { id       => $new_id,
-            url      => $s->{service},
+            url      => $s->{url},
+            name     => $s->{name},
             username => $cfg->{username},
             password => $cfg->{password},
           },
@@ -1282,7 +1248,6 @@
       $self->_add_cfg_items_to_hlist( $l, [ map $_->value, grep $_->name eq 'http', SeqV($cfgs) ], $id );
     }
     return 1;
-
   }
 
   sub _new_cfg_id {
@@ -1349,7 +1314,7 @@
 
   sub check_server_version {
     my ( $self, $server_version ) = @_;
-    my $res = $self->request(
+    my $res = $self->request_api(
       'version',
       [ client_version => $VERSION,
         format         => 'text',
@@ -1374,18 +1339,11 @@
     my @res;
     for my $ident (@$idx_list) {
       unless ( $ident =~ m{//} ) {
-        my $res = $self->request(
-          'node',
-          [ idx    => $ident,
-            format => 'text',
-          ] );
+        my ($res, $content) = $self->request_api( 'node', [ idx => $ident ] );
         unless ( $res->is_success ) {
           die "Failed to resolve $ident!\n" . $res->status_line . "\n";
         }
-        my $f = $res->content;
-        $f =~ s/\r?\n$//;
-        print STDERR "$f\n";
-        push @res, $f;
+        push @res, $content->{node};
       }
       else {
         push @res, undef;
