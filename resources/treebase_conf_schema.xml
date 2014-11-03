@@ -1,68 +1,44 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pml_schema 
-  xmlns="http://ufal.mff.cuni.cz/pdt/pml/schema/" version="1.1">
+<pml_schema xmlns="http://ufal.mff.cuni.cz/pdt/pml/schema/" version="1.1">
   <revision>1.2</revision>
   <root name="pmltq_config">
     <structure>
       <member name="limit"><cdata format="nonNegativeInteger"/></member>
       <member name="row_limit"><cdata format="nonNegativeInteger"/></member>
       <member name="timeout"><cdata format="nonNegativeInteger"/></member>
-      <member name="configurations">
-       <sequence>
-         <element name="dbi" type="dbi-config.type"/>
-         <element name="http" type="http-config.type"/>
-       </sequence>
-     </member>
-   </structure>
- </root>
- <type name="dbi-config.type">
-  <structure>
-    <member name="id" role="#ID" required="1" as_attribute="1"><cdata format="ID"/></member>
-    <member name="driver"><cdata format="NMTOKEN"/></member>
-    <member name="host"><cdata format="anyURI"/></member>
-    <member name="port"><cdata format="integer"/></member>
-    <member name="database"><cdata format="NMTOKEN"/></member>
-    <member name="username"><cdata format="NMTOKEN"/></member>
-    <member name="password"><cdata format="any"/></member>
-    <member name="sources">
-     <alt>
-       <container>
-         <attribute name="schema"><cdata format="NMTOKEN"/></attribute>
-         <cdata format="anyURI"/>
-       </container>
-     </alt>
-   </member>
-   <member name="environment">
-    <list ordered="0">
-     <container>
-       <attribute name="name" required="1">
-         <cdata format="NMTOKEN"/>
-       </attribute>
-       <cdata format="any"/>
-     </container>
-   </list>
- </member>
-</structure>
-</type>
-<type name="http-config.type">
-  <structure>
-    <member name="id" role="#ID" required="1" as_attribute="1"><cdata format="ID"/></member>
-    <member name="url"><cdata format="anyURI"/></member>
-    <member name="username"><cdata format="NMTOKEN"/></member>
-    <member name="password"><cdata format="any"/></member>
-    <member name="cached_description">
-     <structure>
-       <member name="title" required="1">
-         <cdata format="any"/>
-       </member>
-       <member name="abstract">
-         <cdata format="any"/>
-       </member>	  
-       <member name="moreinfo" as_attribute="1">
-         <cdata format="anyURI"/>
-       </member>
-     </structure>
-   </member>
- </structure>
-</type>
+      <member name="servers">
+        <list ordered="0" type="http-config.type" />
+      </member>
+      <member name="recent">
+        <list type="treebank.type" ordered="1" />
+      </member>
+    </structure>
+  </root>
+  <type name="http-config.type">
+    <structure>
+      <member name="id" role="#ID" required="1" as_attribute="1"><cdata format="ID"/></member>
+      <member name="url"><cdata format="anyURI"/></member>
+      <member name="username"><cdata format="NMTOKEN"/></member>
+      <member name="password"><cdata format="any"/></member>
+      <member name="treebanks">
+        <list type="treebank.type" ordered="1" />
+      </member>
+    </structure>
+  </type>
+  <type name="treebank.type">
+    <structure>
+      <member as_attribute="1" required="1" name="name">
+        <cdata format="NMTOKEN"/>
+      </member>
+      <member name="title" required="1">
+        <cdata format="any"/>
+      </member>
+      <member name="description">
+        <cdata format="any"/>
+      </member>    
+      <member name="homepage">
+        <cdata format="anyURI"/>
+      </member>
+    </structure>
+  </type>
 </pml_schema>
