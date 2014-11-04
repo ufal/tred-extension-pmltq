@@ -33,6 +33,7 @@
   use Encode;
   use Treex::PML::Schema;
   use URI;
+  use URI::WithBase;
   use JSON;
 
   my $JSON = JSON->new->utf8;
@@ -161,13 +162,13 @@
       || $DEFAULTS{timeout};
     $self->update_label('Query in progress, please wait....');
     $self->{current_result} = undef;
-    my ($res, $content) = $self->request_api(
-      query => [
+    my ($res, $content) = $self->request_post(
+      query => {
         query     => $query,
         limit     => $limit,
-        row_limit => $row_limit,
+        #row_limit => $row_limit,
         timeout   => $timeout,
-      ]
+      }
     );
     $self->{limit} = $limit;
 
@@ -550,7 +551,7 @@
         object       => $data,
         search_field => 0,
         focus        => $focus,
-        no_sort      => 1,
+        no_sort      => 0,
         password_map => {
           password                       => 1,
           'configurations/http/password' => 1,
@@ -587,23 +588,57 @@
       || die "Failed to obtain PML schema $name\n";
   }
 
+  sub _request_url {
+    my ( $self, $type ) = @_;
+
+    my $cfg      = $self->{config}{data};
+    my $url      = URI::WithBase->new('/', $cfg->{url});
+    my $treebank = $cfg->{treebank};
+    $url->path_segments($API_VERSION, 'treebanks', $treebank, $type);
+    print STDERR "$url\n";
+
+    return $url->abs;
+  }
+
+  sub _decode_responce {
+    my ( $self, $res ) = @_;
+
+    my $json = $res->decoded_content;
+    confess ($json) unless ($res->is_success);
+    return $json ? $JSON->decode($json) : undef;
+  }
+
   sub request_api {
     my ( $self, $type, $data, $out_file ) = @_;
     
-    my $cfg  = $self->{config}{data};
-    my $url  = URI->new($cfg->{url});
-    my $name = $cfg->{name};
-    $url->path_segments($API_VERSION, 'treebanks', $name, $type);
-    print STDERR "$url\n";
+    my $cfg = $self->{config}{data};
+    my $url = $self->_request_url($type);
 
-    my $res  = $self->request_server( $cfg, $url->as_string, $data, $out_file );
-    
+    if (wantarray) {
+      my ($res, $content) = $self->request_server( $cfg, $url->as_string, $data, $out_file );
+      return ($res, $content);
+    }
+    else {
+      my $res = $self->request_server( $cfg, $url->as_string, $data, $out_file );
+      return $res;
+    }
+  }
+
+  sub request_post {
+    my ( $self, $type, $data, $out_file ) = @_;
+
+    my $cfg = $self->{config}{data};
+    my $url = $self->_request_url($type);
+
+    my $req = HTTP::Request->new(POST => $url->as_string);
+    $req->content_type('application/json');
+    $req->content($JSON->encode($data)) if $data;
+
+    my $res = eval { $ua->request( $req, $out_file ? $out_file : () ); };
+    confess($@) if $@;
+
     if (!$out_file and wantarray)  {
-      my $json = $res->decoded_content;
-      use Data::Dumper;
-      print STDERR Dumper($json);
-      confess($json) unless ($res->is_success);
-      return ($res, $json ? $JSON->decode($json) : undef);
+      return ($res, $self->_decode_responce($res));
     }
     return $res;
   }
@@ -621,8 +656,10 @@
   sub request_server {
     my ( $self, $cfg, $url, $data, $out_file ) = @_;
 
-    my $user     = $cfg->{username};
-    my $password = $cfg->{password};
+    my $user     = $cfg->{username} || '';
+    my $password = $cfg->{password} || '';
+
+    print STDERR "$user:$password @ $url";
 
     $ua->credentials( URI->new($url)->host_port, 'PMLTQ', $user, $password )
       if ( grep { defined && length } $password, $user ) == 2;
@@ -630,6 +667,9 @@
     my $res = eval { $ua->get( "${url}", @$data, $out_file ? (':content_file' => $out_file) : () ); };
     confess($@) if $@;
     
+    if (!$out_file and wantarray)  {
+      return ($res, $self->_decode_responce($res));
+    }
     return $res;
   }
 
@@ -660,8 +700,18 @@
       unless (@confs) {
         my $cfg = Treex::PML::Factory->createStructure();
         $cfg->{id} = $self->_new_cfg_id($cfgs);
-        edit_config( 'Edit connection', $cfg, $cfg_type, 'url' )
-          || return;
+        my $valid = 0;
+        do {
+          edit_config( 'Edit connection', $cfg, $cfg_type, 'url' )
+            || return;
+
+          $valid = (grep {defined length} ($cfg->{url}, $cfg->{treebank})) == 2;
+          unless ($valid) {
+            ErrorMessage('Please enter at least server url and treebank name to continue');
+          }
+        }
+        until ($valid);
+        
         $cfgs->push_element( 'http', $cfg );
         push @confs, $cfg;
         if ( _update_service_info( $self, $cfg, 0, undef ) ) {
@@ -832,7 +882,7 @@
     $self->{config}{data} = $cfg;
     $self->{spinbox_timeout} = int( $self->{config}{pml}->get_root->get_member('timeout') )
       || $DEFAULTS{timeout};
-    $self->check_server_version;
+    #$self->check_server_version;
   }
 
   sub _new_service_url {
@@ -909,7 +959,11 @@
     my $top = $l ? $l->toplevel : ToplevelFrame();
     my $anchor = $l && $l->info('anchor');
 
-    my ($res, $content) = $self->request_server( 'metadata', [ client_version => $VERSION ] );
+    my $url      = URI::WithBase->new('/', $cfg->{url});
+    my $treebank = $cfg->{treebank};
+    $url->path_segments($API_VERSION, 'treebanks', $treebank, 'metadata');
+    my ($res, $content) = $self->request_server( $cfg, $url->abs->as_string );
+
     unless ($res->is_success) {
       ErrorMessage( "Failed to connect to server to retrieve basic information about the treebank:\n\n"
           . $res->status_line
@@ -918,8 +972,7 @@
         if $show and ref( $cfg->{cached_description} );
       return;
     }
-    if ( $content->{url} ) {
-      $cfg->{url} = $content->{url};
+    if ( $content ) {
       _update_cached_info( $self, $cfg, $content );
       $self->{config}{pml}->save();
       if ($anchor) {
@@ -1011,9 +1064,9 @@
       $enabled{ $c->{url} } = 1 if $c->{url};
     }
 
-    my $url = URI->new($cfg->{url});
+    my $url = URI::WithBase->new('/', $cfg->{url});
     $url->path_segments($API_VERSION, 'treebanks');
-    my ($res, $content) = $self->request_server( $cfg, $url->as_string, [ client_version => $VERSION ] );
+    my ($res, $content) = $self->request_server( $cfg, $url->abs->as_string );
     unless ( $res->is_success ) {
       ErrorMessage( "Failed to connect to server:\n\n" . $res->status_line . "\n" );
       return;
@@ -1021,12 +1074,12 @@
     my @services;
     my %services;
     for my $service ( @$content ) {
-      if ( $service->{url} ) {
-        push @services, ( $services{$service->{url}} = $service );
+      if ( $service->{name} ) {
+        push @services, ( $services{$service->{name}} = $service );
         if ( exists $service->{access} ) {
 
           # deselect servers the user is not authorized to connect to
-          $enabled{ $service->{url} } = 0 unless $service->{access};
+          $enabled{ $service->{name} } = 0 unless $service->{access};
         }
       }
     }
@@ -1205,19 +1258,19 @@
     return if $d->Show ne 'OK';
 
     foreach my $c ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) ) {
-      my $url = $c->{url};
-      if ( !$url ) {
+      my $name = $c->{treebank};
+      if ( !$name ) {
 
         # prune broken entries
         $cfgs->delete_value($c);
       }
-      elsif ( exists( $enabled{$url} ) ) {
-        if ( $enabled{$url} ) {
-          delete $enabled{$url};
+      elsif ( exists( $enabled{$name} ) ) {
+        if ( $enabled{$name} ) {
+          delete $enabled{$name};
 
           # update cached values:
-          _update_cached_info( $self, $c, $services{$url} )
-            if $services{$url};
+          _update_cached_info( $self, $c, $services{$name} )
+            if $services{$name};
         }
         else {
           $cfgs->delete_value($c);
@@ -1226,13 +1279,13 @@
     }
     my $ids_ref;
     foreach my $s (@services) {
-      if ( $enabled{ $s->{url} } ) {
+      if ( $enabled{ $s->{name} } ) {
         my $new_id;
         ( $new_id, $ids_ref ) = $self->_new_cfg_id( $cfgs, undef, $ids_ref );
         my $c = Treex::PML::Factory->createStructure(
           { id       => $new_id,
-            url      => $s->{url},
-            name     => $s->{name},
+            url      => $cfg->{url},
+            treebank => $s->{name},
             username => $cfg->{username},
             password => $cfg->{password},
           },
