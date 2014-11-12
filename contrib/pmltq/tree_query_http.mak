@@ -252,9 +252,8 @@
   sub resolve_path {
     my ( $self, $path ) = @_;
     return undef unless defined $path;
-    $path =~ s{#.*}{};
-    my $url = $self->_request_url('data', $path);
-    return $url->as_string;
+    my $url = $self->_request_url('data');
+    return $url->as_string . '/' . $path;
   }
 
   sub map_nodes_to_query_pos {
