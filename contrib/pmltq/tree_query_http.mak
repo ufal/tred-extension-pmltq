@@ -593,7 +593,7 @@
     my $url      = URI::WithBase->new('/', $cfg->{url});
     my $treebank = $cfg->{treebank};
     $url->path_segments($API_VERSION, 'treebanks', $treebank, @type);
-    print STDERR "$url\n";
+    #print STDERR "$url\n";
 
     return $url->abs;
   }
