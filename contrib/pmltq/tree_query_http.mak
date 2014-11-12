@@ -660,7 +660,7 @@
     my $user     = $cfg->{username} || '';
     my $password = $cfg->{password} || '';
 
-    print STDERR "$user:$password @ $url";
+    #print STDERR "$user:$password @ $url";
 
     $ua->credentials( URI->new($url)->host_port, 'PMLTQ', $user, $password )
       if ( grep { defined && length } $password, $user ) == 2;
