@@ -221,8 +221,7 @@
         }
         $self->{results}           = $matches;
         $self->{current_result_no} = 0;
-        my $cur_res = $self->{current_result}
-          = [ $self->idx_to_pos( $matches->[0] ) ];
+        my $cur_res = $self->{current_result} = [ $self->idx_to_pos( $matches->[0] ) ];
         for my $win (@wins) {
           SetMinorModeData( 'PMLTQ_Results', 'index', undef, $win );
         }
@@ -253,10 +252,9 @@
   sub resolve_path {
     my ( $self, $path ) = @_;
     return undef unless defined $path;
-    my $cfg = $self->{config}{data};
-    my $url = $cfg->{url};
-    $url .= '/' unless $url =~ m{^https?://.+/};
-    return qq{${url}data/$path};
+    $path =~ s{#.*}{};
+    my $url = $self->_request_url('data', $path);
+    return $url->as_string;
   }
 
   sub map_nodes_to_query_pos {
@@ -589,12 +587,12 @@
   }
 
   sub _request_url {
-    my ( $self, $type ) = @_;
+    my ( $self, @type ) = @_;
 
     my $cfg      = $self->{config}{data};
     my $url      = URI::WithBase->new('/', $cfg->{url});
     my $treebank = $cfg->{treebank};
-    $url->path_segments($API_VERSION, 'treebanks', $treebank, $type);
+    $url->path_segments($API_VERSION, 'treebanks', $treebank, @type);
     print STDERR "$url\n";
 
     return $url->abs;
@@ -612,14 +610,17 @@
     my ( $self, $type, $data, $out_file ) = @_;
     
     my $cfg = $self->{config}{data};
+    $data ||= [];
+
     my $url = $self->_request_url($type);
+    $url->query_form(@$data);
 
     if (wantarray) {
-      my ($res, $content) = $self->request_server( $cfg, $url->as_string, $data, $out_file );
+      my ($res, $content) = $self->request_server( $cfg, $url->as_string, $out_file );
       return ($res, $content);
     }
     else {
-      my $res = $self->request_server( $cfg, $url->as_string, $data, $out_file );
+      my $res = $self->request_server( $cfg, $url->as_string, $out_file );
       return $res;
     }
   }
@@ -654,7 +655,7 @@
   }
 
   sub request_server {
-    my ( $self, $cfg, $url, $data, $out_file ) = @_;
+    my ( $self, $cfg, $url, $out_file ) = @_;
 
     my $user     = $cfg->{username} || '';
     my $password = $cfg->{password} || '';
@@ -664,7 +665,7 @@
     $ua->credentials( URI->new($url)->host_port, 'PMLTQ', $user, $password )
       if ( grep { defined && length } $password, $user ) == 2;
 
-    my $res = eval { $ua->get( "${url}", @$data, $out_file ? (':content_file' => $out_file) : () ); };
+    my $res = eval { $ua->get( "${url}", $out_file ? (':content_file' => $out_file) : () ); };
     confess($@) if $@;
     
     if (!$out_file and wantarray)  {
