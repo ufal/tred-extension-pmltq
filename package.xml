@@ -7,12 +7,15 @@
   <icon>icons/find.png</icon>
   <repository href="http://ufal.mff.cuni.cz/tred/extensions/core/"/>
   <title>PML Tree Query Interface for TrEd</title>
-  <version>1.94</version>
-  <copyright year="2008">Petr Pajas</copyright>
+  <version>2.00</version>
+  <copyright year="2014">Michal Sedlák, Petr Pajas</copyright>
   <description>Provides graphical interface for PML-TQ, which is a system for querying over
   treebanks or local files with a powerful query language.
   </description>
   <require>
     <tred min_version="2.4936"/>
+    <perl_module name="PMLTQ">
+      <other href="http://search.cpan.org/dist/PMLTQ/"/>
+    </perl_module>
   </require>
 </tred_extension>
