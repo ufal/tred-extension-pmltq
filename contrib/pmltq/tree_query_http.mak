@@ -709,6 +709,11 @@
       require Tk::QueryDialog;
       my @confs = ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) );
 
+      # remove obsolete configurations
+      # DELETE this in new releases
+      $cfgs->delete_value($_) for (grep { !$_->{treebank} } @confs);
+      @confs = ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) );
+
       while (!@confs) {
         my $cfg = Treex::PML::Factory->createStructure();
         $cfg->{id} = $self->_new_cfg_id($cfgs);
