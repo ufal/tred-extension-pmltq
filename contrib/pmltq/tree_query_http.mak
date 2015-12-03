@@ -17,7 +17,6 @@
     }
 
     sub get_basic_credentials {
-      return;
     }
   }
 
@@ -32,17 +31,21 @@
   use File::Temp;
   use Encode;
   use Treex::PML::Schema;
+  use Treex::PML::IO;
   use URI;
   use URI::WithBase;
   use JSON;
+  use List::Util 'any';
+  use MIME::Base64 ();
 
   my $JSON = JSON->new->utf8;
-  my $API_VERSION = 'v1';
+  my $API_VERSION = 'api';
 
   use vars qw($VERSION $MIN_SERVER_VERSION);
   $VERSION            = "0.3";
   $MIN_SERVER_VERSION = "0.4";
   my $ua = $Treex::PML::IO::lwp_user_agent;    #TrEd::PMLTQ::UserAgent->new();
+  $ua->cookie_jar({file => File::Spec->catfile( $ENV{HOME}, '.tred.d', '.cookies.txt' )});
 
   #use LWP::UserAgent;
 
@@ -57,8 +60,8 @@
   $PMLTQ::HTTPSearchPreserve::object_id = 0;    # different NS so that TrEd's reload-macros doesn't clear it
 
   # my $ua = $Treex::PML::IO::lwp_user_agent;
-  #$ua = Treex::PML::IO::UserAgent->new;
-  #$ua->agent("TrEd/1.0 ");
+  # my $ua = $Treex::PML::IO::lwp_user_agent = Treex::PML::IO::UserAgent->new;
+  # $ua->agent("TrEd/1.0 ");
 
   sub new {
     my ( $class, $opts ) = @_;
@@ -188,16 +191,16 @@
 
     my $matches = $content->{results};
     if ($matches) {
-      my $returns_nodes = $content->{names};
-      $limit = $row_limit unless $returns_nodes;
+      my $returns_nodes = $content->{nodes} || [];
+      $limit = $row_limit unless @$returns_nodes;
       my $how_many
-        = ( ( $limit and $matches == $limit ) ? '>=' : '' )
-        . $matches
+        = ( ( $limit and @$matches == $limit ) ? '>=' : '' )
+        . scalar(@$matches)
         . (
-        $returns_nodes
-        ? ' match' . ( $matches > 1 ? 'es' : '' )
-        : ' row' . ( $matches > 1 ? 's' : '' ) );
-      unless ($returns_nodes) {
+        @$returns_nodes
+        ? ' match' . ( @$matches > 1 ? 'es' : '' )
+        : ' row' . ( @$matches > 1 ? 's' : '' ) );
+      unless (@$returns_nodes) {
         if ( @$matches >= 1000 ) {
           my $ans = QuestionQuery( 'Results', $how_many, 'Display', 'Save to File', 'Cancel' );
           if ( $ans eq 'Save to File' ) {
@@ -601,7 +604,7 @@
     my ( $self, $res ) = @_;
 
     my $json = $res->decoded_content;
-    confess ($json) unless ($res->is_success);
+    # confess ($json) unless ($res->is_success);
     return $json ? $JSON->decode($json) : undef;
   }
 
@@ -630,7 +633,12 @@
     my $cfg = $self->{config}{data};
     my $url = $self->_request_url($type);
 
-    my $req = HTTP::Request->new(POST => $url->as_string);
+    my $user     = $cfg->{username} || '';
+    my $password = $cfg->{password} || '';
+    my $auth     = ( grep { defined && length } $password, $user ) == 2;
+
+    my $req = HTTP::Request->new( POST => $url->as_string );
+    $req->header(Authorization => 'Basic ' . MIME::Base64::encode("$user:$password", '')) if $auth;
     $req->content_type('application/json');
     $req->content($JSON->encode($data)) if $data;
 
@@ -658,13 +666,17 @@
 
     my $user     = $cfg->{username} || '';
     my $password = $cfg->{password} || '';
+    my $auth     = ( grep { defined && length } $password, $user ) == 2;
 
-    #print STDERR "$user:$password @ $url";
+    # print STDERR "$user:$password @ $url \n";
 
-    $ua->credentials( URI->new($url)->host_port, 'PMLTQ', $user, $password )
-      if ( grep { defined && length } $password, $user ) == 2;
+    $ua->credentials( URI->new($url)->host_port, 'PMLTQ', $user, $password ) if $auth;
 
-    my $res = eval { $ua->get( "${url}", $out_file ? (':content_file' => $out_file) : () ); };
+    my $req = HTTP::Request->new( GET => "${url}" );
+    $req->header(Authorization => 'Basic ' . MIME::Base64::encode("$user:$password", '')) if $auth;
+    $req->content_type('application/json');
+
+    my $res = eval { $ua->request( $req, $out_file ? (':content_file' => $out_file) : () ); };
     confess($@) if $@;
     
     if (!$out_file and wantarray)  {
@@ -697,31 +709,26 @@
       require Tk::QueryDialog;
       my @confs = ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) );
 
-      unless (@confs) {
+      while (!@confs) {
         my $cfg = Treex::PML::Factory->createStructure();
         $cfg->{id} = $self->_new_cfg_id($cfgs);
+        $cfg->{url} = 'http://euler.ms.mff.cuni.cz/'; # UFAL default server
         my $valid = 0;
         do {
-          edit_config( 'Edit connection', $cfg, $cfg_type, 'url' )
+          edit_config( 'New server connection', $cfg, $cfg_type, 'url' )
             || return;
 
-          $valid = (grep {defined length} ($cfg->{url}, $cfg->{treebank})) == 2;
+          $valid = (grep {defined length} ($cfg->{url})) == 1;
           unless ($valid) {
-            ErrorMessage('Please enter at least server url and treebank name to continue');
+            ErrorMessage('Please enter at least server url to continue');
           }
         }
         until ($valid);
         
-        $cfgs->push_element( 'http', $cfg );
-        push @confs, $cfg;
-        if ( _update_service_info( $self, $cfg, 0, undef ) ) {
-          if ( _add_related_service( $self, $cfgs, $cfg, undef ) ) {
-            @confs = ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) );
-          }
-        }
-        else {
-          $self->{config}{pml}->save();
-        }
+        _update_service_info( $self, $cfg, 0, undef ) if $cfg->{treebank};
+        _add_related_service( $self, $cfgs, $cfg, undef );
+        @confs = ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) );
+        $self->{config}{pml}->save() if @confs;
       }
 
       my $d = ToplevelFrame()->DialogBox(
@@ -961,7 +968,7 @@
 
     my $url      = URI::WithBase->new('/', $cfg->{url});
     my $treebank = $cfg->{treebank};
-    $url->path_segments($API_VERSION, 'treebanks', $treebank, 'metadata');
+    $url->path_segments($API_VERSION, 'treebanks', $treebank);
     my ($res, $content) = $self->request_server( $cfg, $url->abs->as_string );
 
     unless ($res->is_success) {
@@ -1061,7 +1068,16 @@
     return unless $cfg and $id;
     my %enabled;
     for my $c ( map $_->value, grep $_->name eq 'http', SeqV($cfgs) ) {
-      $enabled{ $c->{url} } = 1 if $c->{url};
+      $enabled{ $c->{treebank} } = 1 if $c->{treebank};
+    }
+
+    # Load user
+    my $user = {};
+    {
+      my $url = URI::WithBase->new('/', $cfg->{url});
+      $url->path_segments($API_VERSION, 'auth');
+      my ($res, $content) = $self->request_server( $cfg, $url->abs->as_string );
+      $user = $content->{user} if $res->is_success && !!$content;
     }
 
     my $url = URI::WithBase->new('/', $cfg->{url});
@@ -1073,8 +1089,9 @@
     }
     my @services;
     my %services;
-    for my $service ( @$content ) {
+    for my $service ( sort { $a->{title} cmp $b->{title} } @$content ) {
       if ( $service->{name} ) {
+        $service->{access} = !!$service->{isFree} || !!$user->{accessAll} || any { $service->{id} == $_ } @{$user->{availableTreebanks}};
         push @services, ( $services{$service->{name}} = $service );
         if ( exists $service->{access} ) {
 
@@ -1117,7 +1134,7 @@
       );
       $f->bindtags( [ $f, ref($f), $f->toplevel, 'all' ] );
       my $b = $f->Checkbutton(
-        -variable => \$enabled{ $s->{url} },
+        -variable => \$enabled{ $s->{name} },
         -state    => (
           ( exists( $s->{access} ) and $s->{access} == 0 )
           ? 'disabled'

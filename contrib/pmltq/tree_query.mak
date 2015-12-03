@@ -907,13 +907,13 @@ sub NewQuery {
   $opts||={};
   my $id = new_tree_id();
   my $filename = ($opts->{query_file} || DefaultQueryFile());
-  my $fl = first { $_->name eq 'Tree Queries' } TrEdFileLists();
+  my $fl = first { $_->name eq 'Tree_Queries' } TrEdFileLists();
   unless ($fl) {
-    $fl = Filelist->new('Tree Queries');
+    $fl = Filelist->new('Tree_Queries');
     $fl->add(0,$filename);
     AddNewFileList($fl);
   }
-  if (CurrentFile() and $root and GetCurrentFileList() && GetCurrentFileList()->name ne 'Tree Queries'
+  if (CurrentFile() and $root and GetCurrentFileList() && GetCurrentFileList()->name ne 'Tree_Queries'
 	and PML::SchemaName() ne 'tree_query') {
     my $win = SplitWindowVertically({no_init => 1, no_redraw=>1,no_focus=>0,ratio=>-0.5});
     # SetCurrentWindow($win);
