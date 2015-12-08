@@ -1082,7 +1082,7 @@
       my $url = URI::WithBase->new('/', $cfg->{url});
       $url->path_segments($API_VERSION, 'auth');
       my ($res, $content) = $self->request_server( $cfg, $url->abs->as_string );
-      $user = $content->{user} if $res->is_success && !!$content;
+      $user = $content->{user} if $res->is_success && $content && !!$content->{user};
     }
 
     my $url = URI::WithBase->new('/', $cfg->{url});
