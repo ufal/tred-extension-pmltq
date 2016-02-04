@@ -6,6 +6,66 @@
 
 #include <contrib/pml/PML.mak>
 
+BEGIN {
+  use File::Path;
+  use File::Find;
+  my $my_dir  = _directory_of_this_module();
+  my $lib_dir = "$my_dir/../../libs";
+  print "PMLTQ: Initializing the PMLTQ extension.\n";
+  if(not eval {require PMLTQ}) {
+    print "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
+    
+    my $command;
+
+    if ( $^O =~ /^MSWin/ ) {
+        $command = 'perl -e "use CPAN; CPAN::Shell->rematein(q(notest), q(install), q(PMLTQ));"';
+    }
+    else {                                # sh expected otherwise
+        my $bin_dir = "$my_dir/../../bin";
+
+        # current PERL5LIB should be perhaps passed to cpanm, so that modules are not installed twice (?)
+        $command = "perl $bin_dir/cpanm --skip-satisfied -v -l $lib_dir --notest PMLTQ";
+    }
+
+    print "PMLTQ: Executing cpanm: $command\n";
+    system $command;
+
+    if ( eval { require PMLTQ } ) {
+        print "PMLTQ: PMLTQ and related modules successfully installed\n";
+    }
+    else {
+
+        # this should throw a window, which it doesn't now
+        TrEd::Error::Message::error_message( $grp->{focusedWindow}, "PMLTQ: Installation of PMLTQ from CPAN by cpanm failed: $@" );
+    }
+
+  }
+  
+  my $upper_dir = "$my_dir/../..";
+  find( sub {
+          my $file = $_;
+          warn "INFO: Processing $File::Find::name.";
+          return unless -f $file;
+          my ($prefix, $newpath)
+              = ("$File::Find::dir/" =~ m{.*/($arch|perl5)/(.*)});
+          $_ //= q() for $newpath, $prefix;
+          mkpath("$upper_dir/libs/$newpath") or warn "WARNING: Cannot make path $upper_dir/libs/$newpath: $!\n";
+          link($File::Find::name, "$upper_dir/libs/$newpath/$file") or die $!;
+      }, "$upper_dir/libs/lib/perl5" );
+
+
+
+  sub _directory_of_this_module {
+    my %call_info;
+    @call_info{
+        qw(pack file line sub has_args wantarray evaltext is_require)
+        } = caller(0);
+    $call_info{file} =~ s/[\/][^\/]+$//;
+    return $call_info{file};
+  }
+}
+
+
 #binding-context PMLTQ
 
 #include "tree_query.mak"
