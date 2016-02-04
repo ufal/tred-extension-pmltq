@@ -14,8 +14,10 @@
   </description>
   <require>
     <tred min_version="2.4936"/>
+<!--
     <perl_module name="PMLTQ">
       <other href="http://search.cpan.org/dist/PMLTQ/"/>
     </perl_module>
+-->
   </require>
 </tred_extension>
