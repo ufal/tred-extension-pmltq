@@ -9,6 +9,7 @@
 BEGIN {
   use File::Path;
   use File::Find;
+  our $grp;
   my $my_dir  = _directory_of_this_module();
   my $lib_dir = "$my_dir/../../libs";
   print "PMLTQ: Initializing the PMLTQ extension.\n";
@@ -16,27 +17,30 @@ BEGIN {
     print "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
     
     my $command;
-
     if ( $^O =~ /^MSWin/ ) {
-        $command = 'perl -e "use CPAN; CPAN::Shell->rematein(q(notest), q(install), q(PMLTQ));"';
+        $command = $^X.' -e "use CPAN; CPAN::Shell->rematein(q(notest), q(install), q(PMLTQ));"';
     }
     else {                                # sh expected otherwise
         my $bin_dir = "$my_dir/../../bin";
-
+        if(system "$^X $bin_dir/cpanm") { # error while running cpanm
+          TrEd::Error::Message::error_message( $grp, "PMLTQ: Running cpanm failed - unable to install PMLTQ\n$^X $bin_dir/cpanm\nCheck your permissions to ~/.cpanm !!!" );
+          return;
+        }
         # current PERL5LIB should be perhaps passed to cpanm, so that modules are not installed twice (?)
-        $command = "perl $bin_dir/cpanm --skip-satisfied -v -l $lib_dir --notest PMLTQ";
+        $command = "$^X $bin_dir/cpanm --no-sudo --skip-satisfied -v -l $lib_dir --notest PMLTQ 2>\&1";
     }
 
     print "PMLTQ: Executing cpanm: $command\n";
-    system $command;
-
+    my $cmderror = system($command);
+    
     if ( eval { require PMLTQ } ) {
         print "PMLTQ: PMLTQ and related modules successfully installed\n";
     }
     else {
 
         # this should throw a window, which it doesn't now
-        TrEd::Error::Message::error_message( $grp->{focusedWindow}, "PMLTQ: Installation of PMLTQ from CPAN by cpanm failed: $@" );
+        TrEd::Error::Message::error_message( $grp, "PMLTQ: Installation of PMLTQ from CPAN by cpanm failed:\n$cmderror\n$@" );
+        return;
     }
 
   }
@@ -64,7 +68,6 @@ BEGIN {
     return $call_info{file};
   }
 }
-
 
 #binding-context PMLTQ
 
