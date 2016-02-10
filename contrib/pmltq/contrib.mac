@@ -23,7 +23,8 @@ BEGIN {
     else {                                # sh expected otherwise
         my $bin_dir = "$my_dir/../../bin";
         if(system "$^X $bin_dir/cpanm") { # error while running cpanm
-          TrEd::Error::Message::error_message( $grp, "PMLTQ: Running cpanm failed - unable to install PMLTQ\n$^X $bin_dir/cpanm\nCheck your permissions to ~/.cpanm !!!" );
+          TrEd::Extensions::update_extensions_list('pmltq',0);
+          TrEd::Error::Message::error_message( $grp, "PMLTQ: Running cpanm failed - unable to install PMLTQ\n$^X $bin_dir/cpanm\nCheck your permissions to ~/.cpanm !!!\n\nExtension has been dissabled !!!" );
           return;
         }
         # current PERL5LIB should be perhaps passed to cpanm, so that modules are not installed twice (?)
@@ -32,17 +33,14 @@ BEGIN {
 
     print "PMLTQ: Executing cpanm: $command\n";
     my $cmderror = system($command);
-    
     if ( eval { require PMLTQ } ) {
         print "PMLTQ: PMLTQ and related modules successfully installed\n";
     }
     else {
-
-        # this should throw a window, which it doesn't now
-        TrEd::Error::Message::error_message( $grp, "PMLTQ: Installation of PMLTQ from CPAN by cpanm failed:\n$cmderror\n$@" );
+        TrEd::Extensions::update_extensions_list('pmltq',0);
+        TrEd::Error::Message::error_message( $grp, "PMLTQ: Installation of PMLTQ from CPAN by cpanm failed:\n$cmderror\n$@\n\nExtension has been dissabled !!!" );
         return;
     }
-
   }
   
   my $upper_dir = "$my_dir/../..";
