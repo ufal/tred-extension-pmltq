@@ -90,6 +90,27 @@
         -textvariable => \$self->{spinbox_timeout},
       )->pack( -side => 'left', );
       AttachTooltip( $b, 'Select timeout in seconds.' );
+      $tb->Label( -text => "Result limit:" )->pack( -side => 'left', -padx => 10 );
+      $b = $tb->Spinbox(
+        -background   => 'white',
+        -widt         => 6,
+        -from         => 10,
+        -to           => 10000,
+        -increment    => 100,
+        -textvariable => \$self->{limit},
+      )->pack( -side => 'left', );
+      AttachTooltip( $b, 'Select maximum result size.' );
+# TODO: pmltq server does not support row limit parameter
+#      $tb->Label( -text => "Result row limit:" )->pack( -side => 'left', -padx => 10 );
+#      $b = $tb->Spinbox(
+#        -background   => 'white',
+#        -widt         => 6,
+#        -from         => 10,
+#        -to           => 10000,
+#        -increment    => 100,
+#        -textvariable => \$self->{row_limit},
+#      )->pack( -side => 'left', );
+#      AttachTooltip( $b, 'Select maximum rows in result.' );
     }
     $self->{on_destroy} = MacroCallback(
       sub {
@@ -146,17 +167,19 @@
       { resolve_types => 1,
         no_filters    => $opts->{no_filters},
       } ) if ref($query);
-    my ( $limit, $row_limit )
-      = $opts->{count}
-      ? ( 0, 1 )
-      : map { $opts->{$_} || $self->{config}{pml}->get_root->get_member($_) } qw(limit row_limit);
+
 
     for (qw(limit row_limit)) {
-      $opts->{$_} = $DEFAULTS{$_}
+      $opts->{$_} = ($self->{$_} || $DEFAULTS{$_})
         unless defined( $opts->{$_} )
         and length( $opts->{$_} );
       $opts->{$_} = int( $opts->{$_} );
     }
+
+    my ( $limit, $row_limit )
+      = $opts->{count}
+      ? ( 0, 1 )
+      : map { $opts->{$_} || $self->{config}{pml}->get_root->get_member($_) } qw(limit row_limit);
 
     if ( $opts->{count} ) {
       $query .= "\n>> count()";
@@ -169,7 +192,7 @@
       query => {
         query     => $query,
         limit     => $limit,
-        #row_limit => $row_limit,
+        ## row_limit => $row_limit, does not work - server does not support this parameter, TODO !!!
         timeout   => $timeout,
       }
     );
@@ -641,7 +664,6 @@
     $req->header(Authorization => 'Basic ' . MIME::Base64::encode("$user:$password", '')) if $auth;
     $req->content_type('application/json');
     $req->content($JSON->encode($data)) if $data;
-
     my $res = eval { $ua->request( $req, $out_file ? $out_file : () ); };
     confess($@) if $@;
 
@@ -894,6 +916,10 @@
     $self->{config}{data} = $cfg;
     $self->{spinbox_timeout} = int( $self->{config}{pml}->get_root->get_member('timeout') )
       || $DEFAULTS{timeout};
+    $self->{limit} = int( $self->{config}{pml}->get_root->get_member('limit') )
+      || $DEFAULTS{limit};
+    $self->{row_limit} = int( $self->{config}{pml}->get_root->get_member('row_limit') )
+      || $DEFAULTS{row_limit};
     #$self->check_server_version;
   }
 
