@@ -202,11 +202,10 @@
       print STDERR "$query_id\t" . $self->identify . "\n";
     }
     $self->update_label('');
-    unless ( $res->is_success ) {
-      if ( $res->code() eq '500' ) {
+    unless ($res && $res->is_success ) {
+      if ( $res && $res->code() eq '500' ) {
         ErrorMessage( "Error reported by PML-TQ server:\n\n" . $res->content . "\n" );
-      }
-      else {
+      } elsif($content) {
         ErrorMessage( $content->{error} . "\n" );
       }
       return;
@@ -666,6 +665,14 @@
     $req->content($JSON->encode($data)) if $data;
     my $res = eval { $ua->request( $req, $out_file ? $out_file : () ); };
     confess($@) if $@;
+    unless ( $res->is_success ) {
+      if($res->code() == 502) {
+        ErrorMessage( "Error while executing query.\n" );
+      } else {
+        ErrorMessage( "Error reported by PML-TQ server:\n\n" . $res->content . "\n" );
+      }
+      return;
+    }
 
     if (!$out_file and wantarray)  {
       return ($res, $self->_decode_responce($res));
