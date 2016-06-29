@@ -12,6 +12,10 @@ BEGIN {
   our $grp;
   my $my_dir  = _directory_of_this_module();
   my $lib_dir = "$my_dir/../../libs";
+  if ( $^O !~ /^MSWin/ ) {
+    my $arch = $Config{archname};
+    unshift @INC, "$lib_dir/lib/perl5", "$lib_dir/lib/perl5/$arch";
+  }
   print "PMLTQ: Initializing the PMLTQ extension.\n";
   if(not eval {require PMLTQ}) {
     print "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
@@ -43,17 +47,18 @@ BEGIN {
     }
   }
 
-  my $upper_dir = "$my_dir/../..";
-  find( sub {
-          my $file = $_;
-          warn "INFO: Processing $File::Find::name.";
-          return unless -f $file;
-          my ($prefix, $newpath)
-              = ("$File::Find::dir/" =~ m{.*/($arch|perl5)/(.*)});
-          $_ //= q() for $newpath, $prefix;
-          mkpath("$upper_dir/libs/$newpath") or warn "WARNING: Cannot make path $upper_dir/libs/$newpath: $!\n";
-          link($File::Find::name, "$upper_dir/libs/$newpath/$file") or die $!;
-      }, "$upper_dir/libs/lib/perl5" );
+#  my $upper_dir = "$my_dir/../..";
+#  find( sub {
+#          my $file = $_;
+#          warn "INFO: Processing $File::Find::name.";
+#          return unless -f $file;
+#          my ($prefix, $newpath)
+#              = ("$File::Find::dir/" =~ m{.*/($arch|perl5)/(.*)});
+#          $_ //= q() for $newpath, $prefix;
+#          mkpath("$upper_dir/libs/$newpath") or warn "WARNING: Cannot make path $upper_dir/libs/$newpath: $!\n";
+#          link($File::Find::name, "$upper_dir/libs/$newpath/$file") or die $!;
+#      }, "$upper_dir/libs/lib/perl5" );
+  print "PMLTQ: Done.\n";
 
 
 
