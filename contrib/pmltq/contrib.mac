@@ -15,20 +15,20 @@ BEGIN {
   print "PMLTQ: Initializing the PMLTQ extension.\n";
   if(not eval {require PMLTQ}) {
     print "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
-    
+
     my $command;
     if ( $^O =~ /^MSWin/ ) {
         $command = $^X.' -e "use CPAN; CPAN::Shell->rematein(q(notest), q(install), q(PMLTQ));"';
     }
     else {                                # sh expected otherwise
-        my $bin_dir = "$my_dir/../../bin";
-        if(system "$^X $bin_dir/cpanm") { # error while running cpanm
+        my $cpanm = "$my_dir/../../bin/cpanm";
+        if(system "$^X $cpanm --info PMLTQ") { # error while running cpanm
           TrEd::Extensions::update_extensions_list('pmltq',0);
-          TrEd::Error::Message::error_message( $grp, "PMLTQ: Running cpanm failed - unable to install PMLTQ\n$^X $bin_dir/cpanm\nCheck your permissions to ~/.cpanm !!!\n\nExtension has been dissabled !!!" );
+          TrEd::Error::Message::error_message( $grp, "PMLTQ: Running cpanm failed - unable to install PMLTQ\n$^X $cpanm\nCheck your permissions to ~/.cpanm !!!\n\npermissions:\n\tPERMISSIONS\tOWNER\tPATH\n".`ls -ld --time-style="+" ~ ~/.cpanm|tr -s " "|cut -d" " -f 1,3,6-|tr " " "\t"|sed "s/^/\t/"`."\ncurrent user: $ENV{USER}\n\nExtension has been dissabled !!!" );
           return;
         }
         # current PERL5LIB should be perhaps passed to cpanm, so that modules are not installed twice (?)
-        $command = "$^X $bin_dir/cpanm --no-sudo --skip-satisfied -v -l $lib_dir --notest PMLTQ 2>\&1";
+        $command = "$^X $cpanm --no-sudo --skip-satisfied -v -l $lib_dir --notest PMLTQ 2>\&1";
     }
 
     print "PMLTQ: Executing cpanm: $command\n";
@@ -42,7 +42,7 @@ BEGIN {
         return;
     }
   }
-  
+
   my $upper_dir = "$my_dir/../..";
   find( sub {
           my $file = $_;
