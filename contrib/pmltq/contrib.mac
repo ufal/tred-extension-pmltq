@@ -20,7 +20,7 @@ BEGIN {
   }
   print "PMLTQ: Initializing the PMLTQ extension.\n";
 
-  if(not eval {require PMLTQ; $correct_version = sprintf("%05d %05d %05d ", split(".",PMLTQ->VERSION)) ge sprintf("%05d %05d %05d ",split(".", $MINIMAL_PMLTQ_VERSION));}) {
+  if(not eval {require PMLTQ; $correct_version = sprintf("%05d %05d %05d ", split(".",PMLTQ->VERSION)) ge sprintf("%05d %05d %05d ",split(".", $MINIMAL_PMLTQ_VERSION)); not $correct_version}) {
     print $correct_version
           ? "PMLTQ: Minimal required PMLTQ version $MINIMAL_PMLTQ_VERSION is not installed on the system. Trying to install it from CPAN.\n"
           : "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
