@@ -10,6 +10,8 @@ BEGIN {
   use File::Path;
   use File::Find;
   our $grp;
+  my $MINIMAL_PMLTQ_VERSION = '1.3.2';
+  my $correct_version = 1;
   my $my_dir  = _directory_of_this_module();
   my $lib_dir = "$my_dir/../../libs";
   if ( $^O !~ /^MSWin/ ) {
@@ -17,9 +19,11 @@ BEGIN {
     unshift @INC, "$lib_dir/lib/perl5", "$lib_dir/lib/perl5/$arch";
   }
   print "PMLTQ: Initializing the PMLTQ extension.\n";
-  if(not eval {require PMLTQ}) {
-    print "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
 
+  if(not eval {require PMLTQ; $correct_version = sprintf("%05d %05d %05d ", split(".",PMLTQ->VERSION)) ge sprintf("%05d %05d %05d ",split(".", $MINIMAL_PMLTQ_VERSION));}) {
+    print $correct_version
+          ? "PMLTQ: Minimal required PMLTQ version $MINIMAL_PMLTQ_VERSION is not installed on the system. Trying to install it from CPAN.\n"
+          : "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
     my $command;
     if ( $^O =~ /^MSWin/ ) {
         $command = $^X.' -e "use CPAN; CPAN::Shell->rematein(q(notest), q(install), q(PMLTQ));"';
@@ -32,7 +36,7 @@ BEGIN {
           return;
         }
         # current PERL5LIB should be perhaps passed to cpanm, so that modules are not installed twice (?)
-        $command = "$^X $cpanm --no-sudo --skip-satisfied -v -l $lib_dir --notest PMLTQ 2>\&1";
+        $command = "$^X $cpanm --no-sudo -v -l $lib_dir --notest PMLTQ 2>\&1";
     }
 
     print "PMLTQ: Executing cpanm: $command\n";
