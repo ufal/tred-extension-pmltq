@@ -6,6 +6,8 @@
 
 #include <contrib/pml/PML.mak>
 
+use Config;
+
 BEGIN {
   use File::Path;
   use File::Find;
@@ -14,11 +16,14 @@ BEGIN {
   my $correct_version = 0;
   my $my_dir  = _directory_of_this_module();
   my $lib_dir = "$my_dir/../../libs";
+
+  print "PMLTQ: Initializing the PMLTQ extension.\n";
+
   if ( $^O !~ /^MSWin/ ) {
     my $arch = $Config{archname};
     unshift @INC, "$lib_dir/lib/perl5", "$lib_dir/lib/perl5/$arch";
+    print "PMLTQ: Extending \@INC with: $lib_dir/lib/perl5, $lib_dir/lib/perl5/$arch\n";
   }
-  print "PMLTQ: Initializing the PMLTQ extension.\n";
 
   if(not eval {
       require PMLTQ; 
