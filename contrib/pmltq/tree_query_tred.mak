@@ -404,7 +404,8 @@ sub map_nodes_to_query_pos {
       my @ret;
       if (defined($_->[1])) {
 	if ($_->[1]=~/^\Q$fn\E\.([0-9]+)$/) {
-	  @ret=($nodes[$1] => $_->[0])
+    my $key = exists($nodes[$1]->{id}) ?  $nodes[$1]->{id} : $nodes[$1];
+	  @ret=($key => $_->[0])
 	} elsif ($fsfile and $_->[1]=~/^\Q$filename\E#([^#0-9][^#]*)$/) {
 	  my $n = PML::GetNodeByID($1,$fsfile);
 	  @ret = ($n => $_->[0]) if $n;
@@ -448,8 +449,8 @@ sub select_matching_node {
     if ($r) {
       EnableMinorMode('PMLTQ_Results',$win);
       SetCurrentNodeInOtherWin($win,$r);
-      $Redraw='none';
-      Redraw($win);
+#      $Redraw='none';
+#      Redraw($win);
       CenterOtherWinTo($win,$r);
     }
   }

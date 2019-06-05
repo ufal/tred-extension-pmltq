@@ -467,7 +467,8 @@ DeclareMinorMode 'PMLTQ_Results' => {
   post_hooks => {
     node_style_hook => sub {
       my ($node,$styles)=@_;
-      my $m=$PMLTQ::is_match{$node->{id}};
+      my $key = exists($node->{id}) ?  $node->{id} : $node;
+      my $m=$PMLTQ::is_match{$key};
       if (first { $node==$_->[0] } @marked_nodes) {
 	AddStyle($styles,'Oval',-fill => 'orange');
 	AddStyle($styles,'Node',-addwidth=>4);
