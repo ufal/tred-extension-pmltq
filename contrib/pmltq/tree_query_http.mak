@@ -938,6 +938,7 @@
     my ( $self, $cfgs, $cfg_type, $l ) = @_;
     my $cfg = Treex::PML::Factory->createStructure();
     $cfg->{id} = $self->_new_cfg_id($cfgs);
+    $cfg->{url} = 'http://lindat.mff.cuni.cz/services/pmltq/'; ## default lindat url
     edit_config( 'Edit connection', $cfg, $cfg_type, 'url', $l->toplevel )
       || return;
     $cfgs->push_element( 'http', $cfg );
@@ -945,7 +946,6 @@
     $self->_add_cfg_item( $l, $id, $cfg );
     $l->see($id);
     $l->anchorSet($id);
-
     if ( _update_service_info( $self, $cfg, 0, $l ) ) {
       _add_related_service( $self, $cfgs, $cfg, $l );
     }
@@ -1131,17 +1131,22 @@
     }
     my @services;
     my %services;
+    my $not_listed_cnt = 0;
     for my $service ( sort { $a->{title} cmp $b->{title} } @$content ) {
       if ( $service->{name} ) {
-        $service->{access} = !!$service->{isFree} || !!$user->{accessAll} || any { $service->{id} == $_ } @{$user->{availableTreebanks}};
-        push @services, ( $services{$service->{name}} = $service );
-        if ( exists $service->{access} ) {
-
-          # deselect servers the user is not authorized to connect to
-          $enabled{ $service->{name} } = 0 unless $service->{access};
+        if(!!$service->{isFeatured}){
+          $service->{access} = !!$service->{isFree} || !!$user->{accessAll} || any { $service->{id} == $_ } @{$user->{availableTreebanks}};
+          push @services, ( $services{$service->{name}} = $service );
+          if ( exists $service->{access} ) {
+            # deselect servers the user is not authorized to connect to
+            $enabled{ $service->{name} } = 0 unless $service->{access};
+          }
+        } else {
+          $not_listed_cnt += 1;
         }
       }
     }
+    print STDERR "PMLTQ: WARNING $not_listed_cnt treebanks will not be listed (can be added manually with 'new URL' button)\n";
     return unless @services;
     my $top = $l ? $l->toplevel : ToplevelFrame();
     my $d = $top->DialogBox(
