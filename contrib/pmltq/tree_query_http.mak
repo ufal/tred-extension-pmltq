@@ -660,11 +660,14 @@
     my $auth     = ( grep { defined && length } $password, $user ) == 2;
 
     my $req = HTTP::Request->new( POST => $url->as_string );
+    print "PMLTQ: POST ",$url->as_string,"\n";
     $req->header(Authorization => 'Basic ' . MIME::Base64::encode("$user:$password", '')) if $auth;
     $req->content_type('application/json');
     $req->content($JSON->encode($data)) if $data;
+    # print "PMLTQ: request content ",$JSON->encode($data),"\n" if $data;
     my $res = eval { $ua->request( $req, $out_file ? $out_file : () ); };
     confess($@) if $@;
+    print "PMLTQ: response received\n";
     unless ( $res->is_success ) {
       if($res->code() == 502) {
         ErrorMessage( "Error while executing query.\n" );
@@ -698,7 +701,7 @@
     my $auth     = ( grep { defined && length } $password, $user ) == 2;
 
     # print STDERR "$user:$password @ $url \n";
-
+    print "PMLTQ: request $url\n";
     $ua->credentials( URI->new($url)->host_port, 'PMLTQ', $user, $password ) if $auth;
 
     my $req = HTTP::Request->new( GET => "${url}" );
@@ -707,7 +710,8 @@
 
     my $res = eval { $ua->request( $req, $out_file ? (':content_file' => $out_file) : () ); };
     confess($@) if $@;
-    
+    print "PMLTQ: response received\n";
+
     if (!$out_file and wantarray)  {
       return ($res, $self->_decode_responce($res));
     }
@@ -746,7 +750,7 @@
       while (!@confs) {
         my $cfg = Treex::PML::Factory->createStructure();
         $cfg->{id} = $self->_new_cfg_id($cfgs);
-        $cfg->{url} = 'http://euler.ms.mff.cuni.cz/'; # UFAL default server
+        $cfg->{url} = 'http://lindat.mff.cuni.cz/services/pmltq/'; # UFAL default server
         my $valid = 0;
         do {
           edit_config( 'New server connection', $cfg, $cfg_type, 'url' )
