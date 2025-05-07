@@ -506,7 +506,7 @@ DeclareMinorMode 'PMLTQ_Results' => {
 	my $m;
 	for my $item (@$vl) {
 	  for (@$item[1..$#$item]) {
-            my $key = ref $_ ? $_->{id} : $_;
+            my $key = ref {} eq ref $_ ? $_->{id} : $_;
 	    if (defined($m=$PMLTQ::is_match{$key})) {
 	      #print STDERR "match: $m $_\n";
 	      @$item = $item->[0],grep !/^-foreground => /, @$item[1..$#$item];
@@ -633,7 +633,7 @@ Bind sub { $VALUE_LINE_MODE=!$VALUE_LINE_MODE } => {
   changing_file => 0,
 };
 
-our @colors = qw(
+our @colors = do { no warnings 'qw'; qw(
 66B032 ffff93740000 4a6d0133c830 b9f30175f2f0 0392CE ffffe1c90000
 9655c9b94496 fef866282da3 007FFF C154C1 CC7722 FBFB00
 00A86B fef8b3ca5b88 CCCCFF 8844AA 987654 F0E68C
@@ -642,7 +642,7 @@ ADDFAD FFCBA4 007BA7 CC99CC B1A171 dddd00
 6B8E23 FF8855 9BDDFF FF00FF 654321 FFFACD
 00FF00 FF2400 1560BD 997A8D cd0da2373d4f FFFF77
 D0EA2B b7ce1c6b0d0c E2F9FF  c1881d075743  0247FE
-);
+) };
 
 
  my %schema_map = (
@@ -1066,7 +1066,6 @@ sub init_id_map {
 
   my %main_query_nodes;
   if (defined($assign_names) and $assign_names==1) {
-    %main_query_nodes;
     @main_query_nodes{ PMLTQ::Common::FilterQueryNodes($tree) } = ();
   }
   %id = map {
@@ -2732,7 +2731,7 @@ sub EditQuery {
 		 qw|< >|,
 		 ['Function' => [#map { $_.'()' }
 				 sort
-				   qw(
+				   do { no warnings 'qw'; qw(
 				       descendants(#NODE?#)
 				       lbrothers(#NODE?#)
 				       rbrothers(#NODE?#)
@@ -2765,10 +2764,10 @@ sub EditQuery {
 				       match(#STR#,REGEXP,FLAGS?)
                                        if(#CONDITION#,VALUE_IF_TRUE,VALUE_IF_FALSE)
                                        first_defined(VALUE2,VALUE2,...)
-				    )
+				    ) }
 				  ]],
 		 "\n",
-		 qw|, and or () !()|,
+		 do { no warnings 'qw'; qw|, and or () !()| },
 		 [q|"..."| => q|""|],
 		 [q|'...'|=> q|''|],
 		 qw|+ - * / ^ $|,
