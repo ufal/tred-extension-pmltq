@@ -17,19 +17,19 @@ BEGIN {
   my $my_dir  = _directory_of_this_module();
   my $lib_dir = "$my_dir/../../libs";
 
-  print "PMLTQ: Initializing the PMLTQ extension.\n";
+  print STDERR "PMLTQ: Initializing the PMLTQ extension.\n";
 
   if ( $^O !~ /^MSWin/ ) {
     my $arch = $Config{archname};
     unshift @INC, "$lib_dir/lib/perl5", "$lib_dir/lib/perl5/$arch";
-    print "PMLTQ: Extending \@INC with: $lib_dir/lib/perl5, $lib_dir/lib/perl5/$arch\n";
+    print STDERR "PMLTQ: Extending \@INC with: $lib_dir/lib/perl5, $lib_dir/lib/perl5/$arch\n";
   }
 
   if(not eval {
       require PMLTQ; 
       $correct_version = sprintf("%05d %05d %05d ", split /\./, PMLTQ->VERSION) ge sprintf("%05d %05d %05d ",split /\./, $MINIMAL_PMLTQ_VERSION);
       } ) {
-    print $correct_version
+    print STDERR $correct_version
           ? "PMLTQ: Minimal required PMLTQ version $MINIMAL_PMLTQ_VERSION is not installed on the system. Trying to install it from CPAN.\n"
           : "PMLTQ: PMLTQ not installed on the system. Trying to install it from CPAN.\n";
     my $command;
@@ -47,10 +47,10 @@ BEGIN {
         $command = "$^X $cpanm --no-sudo -v -l $lib_dir --notest PMLTQ 2>\&1";
     }
 
-    print "PMLTQ: Executing cpanm: $command\n";
+    print STDERR "PMLTQ: Executing cpanm: $command\n";
     my $cmderror = system($command);
     if ( eval { require PMLTQ } ) {
-        print "PMLTQ: PMLTQ and related modules successfully installed\n";
+        print STDERR "PMLTQ: PMLTQ and related modules successfully installed\n";
     }
     else {
         TrEd::Extensions::update_extensions_list('pmltq',0);
@@ -70,7 +70,7 @@ BEGIN {
 #          mkpath("$upper_dir/libs/$newpath") or warn "WARNING: Cannot make path $upper_dir/libs/$newpath: $!\n";
 #          link($File::Find::name, "$upper_dir/libs/$newpath/$file") or die $!;
 #      }, "$upper_dir/libs/lib/perl5" );
-  print "PMLTQ: Done.\n";
+  print STDERR "PMLTQ: Done.\n";
 
 
 
